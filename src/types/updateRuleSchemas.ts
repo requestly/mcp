@@ -1,8 +1,8 @@
 import z from "zod";
-import { CancelPairSchema, DelayPairSchema, HeadersPairSchema, QueryParamPairSchema, RedirectPairSchema, ReplacePairSchema, RequestPairSchema, ResponsePairSchema, RuleTypeEnum, UserAgentPairSchema } from "./createRuleSchemas.js";
+import { CancelPairSchema, DelayPairSchema, HeadersPairSchema, QueryParamPairSchema, RedirectPairSchema, ReplacePairSchema, RequestPairSchema, ResponsePairSchema, RuleTypeEnum, UserAgentPairSchema } from "./ruleSchemas.js";
 
 // Create individual rule schemas
-function createRuleSchema<T extends z.infer<typeof RuleTypeEnum>>(
+function updateRuleSchema<T extends z.infer<typeof RuleTypeEnum>>(
   ruleType: T,
   pairSchema: z.ZodType<any>
 ) {
@@ -98,15 +98,15 @@ export const schema = createMCPCompatibleSchema();
 // Keep the discriminated union for proper validation
 const getRuleSchema = () =>
   z.discriminatedUnion('ruleType', [
-    createRuleSchema('Redirect', RedirectPairSchema),
-    createRuleSchema('Cancel', CancelPairSchema),
-    createRuleSchema('Replace', ReplacePairSchema),
-    createRuleSchema('Headers', HeadersPairSchema),
-    createRuleSchema('UserAgent', UserAgentPairSchema),
-    createRuleSchema('QueryParam', QueryParamPairSchema),
-    createRuleSchema('Request', RequestPairSchema),
-    createRuleSchema('Response', ResponsePairSchema),
-    createRuleSchema('Delay', DelayPairSchema),
+    updateRuleSchema('Redirect', RedirectPairSchema),
+    updateRuleSchema('Cancel', CancelPairSchema),
+    updateRuleSchema('Replace', ReplacePairSchema),
+    updateRuleSchema('Headers', HeadersPairSchema),
+    updateRuleSchema('UserAgent', UserAgentPairSchema),
+    updateRuleSchema('QueryParam', QueryParamPairSchema),
+    updateRuleSchema('Request', RequestPairSchema),
+    updateRuleSchema('Response', ResponsePairSchema),
+    updateRuleSchema('Delay', DelayPairSchema),
   ]);
 
 export const ruleSchema = getRuleSchema();
