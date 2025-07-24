@@ -7,17 +7,24 @@
     "requestly-mcp": "./build/index.js"
   },
   "scripts": {
-    "build": "tsc && chmod 755 build/index.js",
+    "build": "esbuild src/index.ts --bundle --minify --platform=node --format=esm --outfile=build/index.js && chmod 755 build/index.js",
     "start": "node build/index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": ["requestly", "mcp", "server", "rules", "groups"],
+  "keywords": [
+    "requestly",
+    "mcp",
+    "server",
+    "rules",
+    "groups"
+  ],
   "author": "Your Name",
   "license": "MIT",
-  "packageManager": "pnpm@7.20.0+sha256.79612d90ca49c14b9a1307d681003d7f72403324ff63cae53467abf66a386924",
+  "packageManager": "pnpm@9.15.9",
   "description": "Requestly MCP server for rule and group management via stdio.",
   "devDependencies": {
     "@types/node": "^24.1.0",
+    "esbuild": "^0.25.8",
     "typescript": "^5.8.3"
   },
   "dependencies": {
