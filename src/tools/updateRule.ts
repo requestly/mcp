@@ -38,9 +38,7 @@ export function registerUpdateRuleTool(server: McpServer) {
           };
         }
         const { ruleId, ...rest } = validatedArgs;
-        const body: Record<string, unknown> = { ...rest };
-        // Ensure required fields for Requestly
-        body.objectType = 'rule';
+        const body = { ...rest };
 
         const response = await fetch(`https://api2.requestly.io/v1/rules/${ruleId}`,
           {

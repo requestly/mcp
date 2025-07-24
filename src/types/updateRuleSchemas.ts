@@ -1,5 +1,16 @@
-import z from "zod";
-import { CancelPairSchema, DelayPairSchema, HeadersPairSchema, QueryParamPairSchema, RedirectPairSchema, ReplacePairSchema, RequestPairSchema, ResponsePairSchema, RuleTypeEnum, UserAgentPairSchema } from "./ruleSchemas.js";
+import z from 'zod';
+import {
+  CancelPairSchema,
+  DelayPairSchema,
+  HeadersPairSchema,
+  QueryParamPairSchema,
+  RedirectPairSchema,
+  ReplacePairSchema,
+  RequestPairSchema,
+  ResponsePairSchema,
+  RuleTypeEnum,
+  UserAgentPairSchema,
+} from './ruleSchemas.js';
 
 // Create individual rule schemas
 function updateRuleSchema<T extends z.infer<typeof RuleTypeEnum>>(
@@ -17,9 +28,12 @@ function updateRuleSchema<T extends z.infer<typeof RuleTypeEnum>>(
       .default('Active')
       .describe('Status of the rule.'),
     pairs: z
-      .array(pairSchema).optional()
+      .array(pairSchema)
+      .optional()
       .describe('List of rule pair objects for the rule type.'),
-      groupId: z.string().optional().describe('ID of the group this rule belongs to.'),
+    objectType: z
+      .literal('rule')
+      .describe('Type of the object, always "rule".'),
   });
 }
 
@@ -50,7 +64,9 @@ const createMCPCompatibleSchema = () => {
       .optional()
       .default('Active')
       .describe('Status of the rule.'),
-      groupId: z.string().optional().describe('ID of the group this rule belongs to.'),
+    objectType: z
+      .literal('rule')
+      .describe('Type of the object, always "rule".'),
   };
 
   // Create detailed pair descriptions for each rule type
