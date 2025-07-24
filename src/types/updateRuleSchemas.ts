@@ -18,7 +18,8 @@ function updateRuleSchema<T extends z.infer<typeof RuleTypeEnum>>(
       .describe('Status of the rule.'),
     pairs: z
       .array(pairSchema).optional()
-      .describe('List of rule pair objects for the rule type.')
+      .describe('List of rule pair objects for the rule type.'),
+      groupId: z.string().optional().describe('ID of the group this rule belongs to.'),
   });
 }
 
@@ -49,6 +50,7 @@ const createMCPCompatibleSchema = () => {
       .optional()
       .default('Active')
       .describe('Status of the rule.'),
+      groupId: z.string().optional().describe('ID of the group this rule belongs to.'),
   };
 
   // Create detailed pair descriptions for each rule type
