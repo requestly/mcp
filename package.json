@@ -1,5 +1,5 @@
 {
-  "name": "requestly-mcp",
+  "name": "rqstly-mcp",
   "version": "1.0.0",
   "main": "build/index.js",
   "type": "module",
