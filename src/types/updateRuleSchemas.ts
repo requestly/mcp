@@ -1,94 +1,5 @@
-import { z } from 'zod';
-
-export const SourceSchema = z.object({
-  key: z.enum(['Url', 'Host', 'Path']),
-  operator: z.enum(['Equals', 'Contains', 'Matches', 'Wildcard_Matches']),
-  value: z.string(),
-});
-
-// All pair schemas...
-export const RedirectPairSchema = z.object({
-  source: SourceSchema,
-  destinationType: z.string(),
-  destination: z.string(),
-});
-
-export const CancelPairSchema = z.object({
-  source: SourceSchema,
-});
-
-export const ReplacePairSchema = z.object({
-  source: SourceSchema,
-  from: z.string(),
-  to: z.string(),
-});
-
-export const HeaderModificationSchema = z.object({
-  header: z.string(),
-  type: z.enum(['Add', 'Remove', 'Modify']),
-  value: z.string().optional(),
-});
-
-export const HeadersPairSchema = z.object({
-  source: SourceSchema,
-  modifications: z.object({
-    Request: z.array(HeaderModificationSchema).optional(),
-    Response: z.array(HeaderModificationSchema).optional(),
-  }),
-});
-
-export const UserAgentPairSchema = z.object({
-  source: SourceSchema,
-  userAgent: z.string(),
-});
-
-export const QueryParamModificationSchema = z.object({
-  param: z.string(),
-  type: z.enum(['Add', 'Remove', 'Remove All']),
-  value: z.string().optional(),
-});
-
-export const QueryParamPairSchema = z.object({
-  source: SourceSchema,
-  modifications: z.array(QueryParamModificationSchema),
-});
-
-export const RequestPairSchema = z.object({
-  source: SourceSchema,
-  request: z.object({
-    type: z.enum(['code', 'static']),
-    value: z.string(),
-  }),
-});
-
-export const ResponsePairSchema = z.object({
-  source: SourceSchema,
-  response: z.object({
-    type: z.enum(['code', 'static']),
-    value: z.string(),
-    serveWithoutRequest: z.boolean().optional(),
-  }),
-});
-
-export const DelayPairSchema = z.object({
-  source: SourceSchema,
-  delay: z.string().refine((val) => /^\d+$/.test(val), {
-    message: 'Delay must be a string containing a number',
-  }),
-});
-
-// Rule type enum
-export const RuleTypeEnum = z.enum([
-  'Redirect',
-  'Cancel',
-  'Replace',
-  'Headers',
-  'UserAgent',
-  'QueryParam',
-  'Request',
-  'Response',
-  'Delay',
-]);
+import z from "zod";
+import { CancelPairSchema, DelayPairSchema, HeadersPairSchema, QueryParamPairSchema, RedirectPairSchema, ReplacePairSchema, RequestPairSchema, ResponsePairSchema, RuleTypeEnum, UserAgentPairSchema } from "./createRuleSchemas.js";
 
 // Create individual rule schemas
 function createRuleSchema<T extends z.infer<typeof RuleTypeEnum>>(
@@ -96,7 +7,8 @@ function createRuleSchema<T extends z.infer<typeof RuleTypeEnum>>(
   pairSchema: z.ZodType<any>
 ) {
   return z.object({
-    name: z.string().describe('Name of the rule.'),
+    ruleId: z.string().describe('Unique identifier for the rule.').optional(),
+    name: z.string().describe('Name of the rule.').optional(),
     description: z.string().optional().describe('Description of the rule.'),
     ruleType: z.literal(ruleType).describe('Type of the rule.'),
     status: z
@@ -105,12 +17,8 @@ function createRuleSchema<T extends z.infer<typeof RuleTypeEnum>>(
       .default('Active')
       .describe('Status of the rule.'),
     pairs: z
-      .array(pairSchema)
-      .describe('List of rule pair objects for the rule type.'),
-    groupId: z
-      .string()
-      .optional()
-      .describe('ID of the group the rule belongs to.'),
+      .array(pairSchema).optional()
+      .describe('List of rule pair objects for the rule type.')
   });
 }
 
@@ -118,7 +26,8 @@ function createRuleSchema<T extends z.infer<typeof RuleTypeEnum>>(
 const createMCPCompatibleSchema = () => {
   // Base fields that are common to all rules
   const baseFields = {
-    name: z.string().describe('Name of the rule.'),
+    ruleId: z.string().describe('Unique identifier for the rule.').optional(),
+    name: z.string().describe('Name of the rule.').optional(),
     description: z.string().optional().describe('Description of the rule.'),
     ruleType: z
       .enum([
@@ -140,10 +49,6 @@ const createMCPCompatibleSchema = () => {
       .optional()
       .default('Active')
       .describe('Status of the rule.'),
-    groupId: z
-      .string()
-      .optional()
-      .describe('ID of the group the rule belongs to.'),
   };
 
   // Create detailed pair descriptions for each rule type
