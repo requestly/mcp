@@ -14,28 +14,38 @@ export function registerCreateRuleTool(server: McpServer) {
     try {
       // Validate the full request using our discriminated union schema
       const validatedArgs: ValidatedRuleArgs = ruleSchema.parse(args);
-      
-      const { name, description, apiKey, ruleType, status, pairs, groupId } = validatedArgs;
-    const body: Record<string, unknown> = {
-      name,
-      objectType: 'rule',
-      status: status || 'Active',
-      ruleType,
-      pairs,
-      description: description || undefined,
-    };
-    if (groupId) {
-      body.groupId = groupId;
-    }
+      const { name, description, ruleType, status, pairs, groupId } = validatedArgs;
+      const apiKey = process.env.REQUESTLY_API_KEY;
+      if (!apiKey) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: 'Error: REQUESTLY_API_KEY environment variable is not set.',
+            },
+          ],
+        };
+      }
+      const body: Record<string, unknown> = {
+        name,
+        objectType: 'rule',
+        status: status || 'Active',
+        ruleType,
+        pairs,
+        description: description || undefined,
+      };
+      if (groupId) {
+        body.groupId = groupId;
+      }
 
-    const response = await fetch('https://api2.requestly.io/v1/rules', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-      },
-      body: JSON.stringify(body),
-    });
+      const response = await fetch('https://api2.requestly.io/v1/rules', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+        },
+        body: JSON.stringify(body),
+      });
     if (!response.ok) {
       const errorText = await response.text();
       return {

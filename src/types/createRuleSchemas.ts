@@ -141,8 +141,7 @@ const createMCPCompatibleSchema = () => {
     groupId: z
       .string()
       .optional()
-      .describe('ID of the group the rule belongs to.'),
-    apiKey: z.string().describe('Requestly API key (x-api-key header)'),
+      .describe('ID of the group the rule belongs to.')
   };
 
   // Create detailed pair descriptions for each rule type
