@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { registerTools } from './tools/index.js';
@@ -20,7 +21,7 @@ async function main() {
   // Register all tools
   registerTools(server);
   await server.connect(transport);
-  console.error('Requestly Weather MCP Server running on stdio');
+  console.error('Requestly MCP Server running on stdio');
 }
 
 main().catch((error) => {
