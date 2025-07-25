@@ -4,7 +4,7 @@
   "main": "build/index.js",
   "type": "module",
   "bin": {
-    "requestly-mcp": "./build/index.js"
+    "rqstli-mcp": "./build/index.js"
   },
   "scripts": {
     "build": "esbuild src/index.ts --bundle --minify --platform=node --format=esm --outfile=build/index.js && chmod 755 build/index.js",
