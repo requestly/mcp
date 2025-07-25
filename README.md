@@ -18,19 +18,23 @@ Configure your `.vscode/mcp.json` to use:
 "Requestly Server": {
   "type": "stdio",
   "command": "npx",
-  "args": ["requestly-mcp"],
+  "args": ["@requestly/mcp"],
   "env": {
     "REQUESTLY_API_KEY": "<your-api-key>"
   }
 }
 ```
 
-
 ```sh
-npx requestly-mcp
+npx @requestly/mcp
 ```
+
+## Get Your API Key
+To use this server, you'll need a Requestly API key.
+Request yours by filling out this [short form](https://app.formbricks.com/s/clryn62s316gjdeho9j03t7oa).
+Our team will review your request and provide access shortly
 
 ## References
 - MCP SDK: https://github.com/modelcontextprotocol/create-python-server
 - MCP Protocol: https://modelcontextprotocol.io/llms-full.txt
-- Requestly API Docs: https://requestly.io/api
+- Requestly API Docs: https://docs.requestly.com/public-apis/overview
