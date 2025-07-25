@@ -1,16 +1,18 @@
-import { z } from 'zod';
+import {z} from "zod";
 
 export const SourceSchema = z.object({
   key: z.enum(['Url', 'Host', 'Path']).describe('Source key for matching: Url, Host, or Path.'),
   operator: z.enum(['Equals', 'Contains', 'Matches', 'Wildcard_Matches']).describe('Operator for matching: Equals, Contains, Matches, or Wildcard_Matches.'),
   value: z.string().describe('Value to match against.'),
-  filters: z.object({
-    requestMethod: z.array(z.string()).optional().describe('Array of allowed HTTP methods for matching.'),
-    requestPayload: z.object({
-      key: z.string().describe('Key in the request payload.'),
-      value: z.string().describe('Value for the request payload key.'),
-    }).optional().describe('Request payload filter.'),
-  }).optional().describe('Optional filters for advanced matching.'),
+  filters: z.array(
+    z.object({
+      requestMethod: z.array(z.string()).optional().describe('Array of allowed HTTP methods for matching.'),
+      requestPayload: z.object({
+        key: z.string().describe('Key in the request payload.'),
+        value: z.string().describe('Value for the request payload key.'),
+      }).optional().describe('Request payload filter.'),
+    })
+  ).optional().describe('Array of filter objects for advanced matching.'),
 }).describe('Source matching criteria for a rule.');
 
 // All pair schemas...
