@@ -2,6 +2,10 @@
 
 This project is a Model Context Protocol (MCP) server implemented in TypeScript using the @modelcontextprotocol/sdk. It provides full CRUD tools for Requestly rules and groups, and can be run as a stdio MCP server.
 
+<a href="https://glama.ai/mcp/servers/@requestly/mcp">
+  <img width="380" height="200" src="https://glama.ai/mcp/servers/@requestly/mcp/badge" alt="Requestly Server MCP server" />
+</a>
+
 ## Features
 - Create, read, update, and delete Requestly rules
 - Create, read, update, and delete Requestly groups
