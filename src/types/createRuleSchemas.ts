@@ -1,5 +1,5 @@
 import z from "zod";
-import { CancelPairSchema, DelayPairSchema, HeadersPairSchema, QueryParamPairSchema, RedirectPairSchema, ReplacePairSchema, RequestPairSchema, ResponsePairSchema, RuleTypeEnum, UserAgentPairSchema } from "./ruleSchemas.js";
+import { CancelPairSchema, DelayPairSchema, HeadersPairSchema, QueryParamPairSchema, RedirectPairSchema, ReplacePairSchema, RequestPairSchema, ResponsePairSchema, ScriptPairSchema, RuleTypeEnum, UserAgentPairSchema } from "./ruleSchemas.js";
 
 function createRuleSchema<T extends z.infer<typeof RuleTypeEnum>>(
   ruleType: T,
@@ -37,6 +37,7 @@ const createMCPCompatibleSchema = () => {
         'Replace',
         'Headers',
         'UserAgent',
+        'Script',
         'QueryParam',
         'Request',
         'Response',
@@ -68,6 +69,8 @@ const createMCPCompatibleSchema = () => {
       'Array of header pairs. Each pair must have: source (matching criteria), modifications (array of header modifications with header, type, and optional value)',
     UserAgent:
       'Array of user agent pairs. Each pair must have: source (matching criteria), userAgent (custom user agent string)',
+    Script:
+      'Array of script injection pairs. Each pair must have: source (matching criteria), scripts (array of script objects with codeType "js" or "css", value (script content or URL), loadTime "beforePageLoad" or "afterPageLoad", type "url" or "code")',
     QueryParam:
       'Array of query param pairs. Each pair must have: source (matching criteria), modifications (array of param modifications)',
     Request:
@@ -88,6 +91,7 @@ const createMCPCompatibleSchema = () => {
       - Replace: ${pairDescriptions.Replace}
       - Headers: ${pairDescriptions.Headers}
       - UserAgent: ${pairDescriptions.UserAgent}
+      - Script: ${pairDescriptions.Script}
       - QueryParam: ${pairDescriptions.QueryParam}
       - Request: ${pairDescriptions.Request}
       - Response: ${pairDescriptions.Response}
@@ -108,6 +112,7 @@ const getRuleSchema = () =>
     createRuleSchema('Replace', ReplacePairSchema),
     createRuleSchema('Headers', HeadersPairSchema),
     createRuleSchema('UserAgent', UserAgentPairSchema),
+    createRuleSchema('Script', ScriptPairSchema),
     createRuleSchema('QueryParam', QueryParamPairSchema),
     createRuleSchema('Request', RequestPairSchema),
     createRuleSchema('Response', ResponsePairSchema),

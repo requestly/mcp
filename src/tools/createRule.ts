@@ -7,7 +7,7 @@ export function registerCreateRuleTool(server: McpServer) {
   {
     title: 'Create Rule',
     description:
-      'This endpoint allows you to create various types of rules in Requestly, such as Redirect, Cancel, Replace, Headers, User-Agent, Query Param, Modify Request, Modify Response, and Delay. Each rule has a specific structure and parameters based on the ruleType.',
+      'This endpoint allows you to create various types of rules in Requestly, such as Redirect, Cancel, Replace, Headers, User-Agent, Script (Insert Script), Query Param, Modify Request, Modify Response, and Delay. Each rule has a specific structure and parameters based on the ruleType.',
     inputSchema: schema,
   },
   async (args: Record<string, unknown>): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {

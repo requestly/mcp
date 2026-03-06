@@ -89,6 +89,18 @@ export const DelayPairSchema = z.object({
   }).describe('Delay value in milliseconds (stringified number).'),
 }).describe('Delay rule pair: source and delay.');
 
+export const ScriptModificationSchema = z.object({
+  codeType: z.enum(['js', 'css']).describe('Script language: js or css.'),
+  value: z.string().describe('Script content or URL depending on type.'),
+  loadTime: z.enum(['beforePageLoad', 'afterPageLoad']).describe('When to load the script: beforePageLoad or afterPageLoad.'),
+  type: z.enum(['url', 'code']).describe('Script value type: url (external script URL) or code (inline script).'),
+}).describe('Script modification details.');
+
+export const ScriptPairSchema = z.object({
+  source: SourceSchema,
+  scripts: z.array(ScriptModificationSchema).describe('Array of script modifications to inject.'),
+}).describe('Script rule pair: source and scripts to inject.');
+
 // Rule type enum
 export const RuleTypeEnum = z.enum([
   'Redirect',
@@ -96,6 +108,7 @@ export const RuleTypeEnum = z.enum([
   'Replace',
   'Headers',
   'UserAgent',
+  'Script',
   'QueryParam',
   'Request',
   'Response',
