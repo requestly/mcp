@@ -12,6 +12,7 @@ import {
   DelayPairSchema,
   ScriptPairSchema,
   ScriptModificationSchema,
+  ScriptAttributeSchema,
   RuleTypeEnum,
 } from '../types/ruleSchemas.js';
 import {
@@ -403,6 +404,42 @@ describe('ScriptModificationSchema', () => {
     const { codeType, ...rest } = validMod;
     expect(() => ScriptModificationSchema.parse(rest)).toThrow();
   });
+
+  it('accepts optional attributes array', () => {
+    const result = ScriptModificationSchema.parse({
+      ...validMod,
+      attributes: [
+        { name: 'data-tracker-id', value: '1234-5678' },
+        { name: 'type', value: 'text/javascript' },
+      ],
+    });
+    expect(result.attributes).toHaveLength(2);
+    expect(result.attributes![0].name).toBe('data-tracker-id');
+  });
+
+  it('accepts script without attributes (optional)', () => {
+    const result = ScriptModificationSchema.parse(validMod);
+    expect(result.attributes).toBeUndefined();
+  });
+
+  it('accepts empty attributes array', () => {
+    const result = ScriptModificationSchema.parse({ ...validMod, attributes: [] });
+    expect(result.attributes).toHaveLength(0);
+  });
+});
+
+describe('ScriptAttributeSchema', () => {
+  it('accepts valid attribute', () => {
+    expect(() => ScriptAttributeSchema.parse({ name: 'data-id', value: '123' })).not.toThrow();
+  });
+
+  it('rejects missing name', () => {
+    expect(() => ScriptAttributeSchema.parse({ value: '123' })).toThrow();
+  });
+
+  it('rejects missing value', () => {
+    expect(() => ScriptAttributeSchema.parse({ name: 'data-id' })).toThrow();
+  });
 });
 
 describe('ScriptPairSchema', () => {
@@ -424,7 +461,7 @@ describe('ScriptPairSchema', () => {
         scripts: [
           { codeType: 'js', value: 'alert("hi")', loadTime: 'beforePageLoad', type: 'code' },
           { codeType: 'css', value: 'body { color: red; }', loadTime: 'afterPageLoad', type: 'code' },
-          { codeType: 'js', value: 'https://cdn.example.com/lib.js', loadTime: 'beforePageLoad', type: 'url' },
+          { codeType: 'js', value: 'https://cdn.example.com/lib.js', loadTime: 'beforePageLoad', type: 'url', attributes: [{ name: 'defer', value: '' }] },
         ],
       })
     ).not.toThrow();
@@ -582,6 +619,27 @@ describe('createRuleSchema (discriminated union)', () => {
         }],
       })
     ).not.toThrow();
+  });
+
+  it('validates Script rule with custom attributes', () => {
+    const result = createRuleSchema.parse({
+      ...baseRule,
+      ruleType: 'Script',
+      pairs: [{
+        source: validSource,
+        scripts: [{
+          codeType: 'js',
+          value: 'https://tracker.example.com/script.js',
+          loadTime: 'afterPageLoad',
+          type: 'url',
+          attributes: [
+            { name: 'data-luigisbox-tracker-id', value: '1234-5678' },
+            { name: 'type', value: 'text/javascript' },
+          ],
+        }],
+      }],
+    });
+    expect(result.pairs[0].scripts[0].attributes).toHaveLength(2);
   });
 
   it('rejects Script rule with invalid pair (missing scripts)', () => {
