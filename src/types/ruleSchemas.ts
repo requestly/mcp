@@ -89,11 +89,17 @@ export const DelayPairSchema = z.object({
   }).describe('Delay value in milliseconds (stringified number).'),
 }).describe('Delay rule pair: source and delay.');
 
+export const ScriptAttributeSchema = z.object({
+  name: z.string().describe('Attribute name (e.g. "data-tracker-id", "type", "defer").'),
+  value: z.string().describe('Attribute value.'),
+}).describe('Custom HTML attribute to add to the injected script tag.');
+
 export const ScriptModificationSchema = z.object({
   codeType: z.enum(['js', 'css']).describe('Script language: js or css.'),
   value: z.string().describe('Script content or URL depending on type.'),
   loadTime: z.enum(['beforePageLoad', 'afterPageLoad']).describe('When to load the script: beforePageLoad or afterPageLoad.'),
   type: z.enum(['url', 'code']).describe('Script value type: url (external script URL) or code (inline script).'),
+  attributes: z.array(ScriptAttributeSchema).optional().describe('Optional array of custom HTML attributes to add to the injected script tag.'),
 }).describe('Script modification details.');
 
 export const ScriptPairSchema = z.object({

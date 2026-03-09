@@ -125,6 +125,16 @@ describe('Create Rule Tool - Schema Validation per Rule Type', () => {
           source: validSource,
           scripts: [
             { codeType: 'js', value: 'console.log("injected")', loadTime: 'afterPageLoad', type: 'code' },
+            {
+              codeType: 'js',
+              value: 'https://tracker.example.com/script.js',
+              loadTime: 'afterPageLoad',
+              type: 'url',
+              attributes: [
+                { name: 'data-tracker-id', value: '12345' },
+                { name: 'type', value: 'text/javascript' },
+              ],
+            },
           ],
         }],
       },
