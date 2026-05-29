@@ -1,5 +1,8 @@
 # Requestly MCP Server
 
+> **Part of [Requestly API Client](https://github.com/requestly/requestly)** · See also: [HTTP Interceptor](https://github.com/requestly/interceptor) · [Docs](https://docs.requestly.com)
+
+
 This project is a Model Context Protocol (MCP) server implemented in TypeScript using the @modelcontextprotocol/sdk. It provides full CRUD tools for Requestly rules and groups, and can be run as a stdio MCP server.
 
 ## Features
