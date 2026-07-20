@@ -392,10 +392,22 @@ describe('Delete Rule Tool', () => {
     return toolHandler(args);
   }
 
-  it('deletes a rule by ID', async () => {
-    const result = await callDeleteRuleTool({ ruleId: 'Cancel_abc12' });
+  it('deletes a rule by ID when confirm is true', async () => {
+    const result = await callDeleteRuleTool({ ruleId: 'Cancel_abc12', confirm: true });
     expect(result.content[0].text).toContain('success');
     expect((globalThis.fetch as any).mock.calls[0][0]).toBe('https://api2.requestly.io/v1/rules/Cancel_abc12');
     expect((globalThis.fetch as any).mock.calls[0][1].method).toBe('DELETE');
+  });
+
+  it('refuses to delete without explicit confirm and issues no request', async () => {
+    const result = await callDeleteRuleTool({ ruleId: 'Cancel_abc12' });
+    expect(result.content[0].text).toContain('Confirmation required');
+    expect(globalThis.fetch as any).not.toHaveBeenCalled();
+  });
+
+  it('refuses to delete when confirm is false and issues no request', async () => {
+    const result = await callDeleteRuleTool({ ruleId: 'Cancel_abc12', confirm: false });
+    expect(result.content[0].text).toContain('Confirmation required');
+    expect(globalThis.fetch as any).not.toHaveBeenCalled();
   });
 });

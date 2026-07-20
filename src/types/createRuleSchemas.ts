@@ -12,8 +12,11 @@ function createRuleSchema<T extends z.infer<typeof RuleTypeEnum>>(
     status: z
       .enum(['Active', 'Inactive'])
       .optional()
-      .default('Active')
-      .describe('Status of the rule.'),
+      .default('Inactive')
+      .describe(
+        'Status of the rule. Defaults to Inactive; rules must be explicitly activated ' +
+        'after a human reviews them. Script/Request/Response rules are always created Inactive.'
+      ),
     pairs: z
       .array(pairSchema)
       .describe('List of rule pair objects for the rule type.'),
@@ -49,8 +52,11 @@ const createMCPCompatibleSchema = () => {
     status: z
       .enum(['Active', 'Inactive'])
       .optional()
-      .default('Active')
-      .describe('Status of the rule.'),
+      .default('Inactive')
+      .describe(
+        'Status of the rule. Defaults to Inactive; rules must be explicitly activated ' +
+        'after a human reviews them. Script/Request/Response rules are always created Inactive.'
+      ),
     groupId: z
       .string()
       .optional()

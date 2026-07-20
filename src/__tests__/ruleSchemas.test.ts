@@ -702,13 +702,13 @@ describe('createRuleSchema (discriminated union)', () => {
     expect(result.description).toBe('Test description');
   });
 
-  it('defaults status to Active', () => {
+  it('defaults status to Inactive', () => {
     const result = createRuleSchema.parse({
       name: 'Test',
       ruleType: 'Cancel',
       pairs: [{ source: validSource }],
     });
-    expect(result.status).toBe('Active');
+    expect(result.status).toBe('Inactive');
   });
 });
 

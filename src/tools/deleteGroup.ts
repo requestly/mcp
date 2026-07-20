@@ -6,12 +6,45 @@ export function registerDeleteGroupTool(server: McpServer) {
     "delete_group",
     {
       title: "Delete Group",
-      description: "Delete a specific group in Requestly using its id.",
+      description:
+        "Delete a specific group in Requestly using its id. IRREVERSIBLE and CASCADES " +
+        "— deleting a group also deletes every rule it contains. Requires confirm: true. " +
+        "Never set confirm: true on the user's behalf — first show the user the exact group " +
+        "id and get their explicit approval.",
       inputSchema: {
         id: z.string().describe("Unique identifier of the group to delete."),
+        confirm: z
+          .boolean()
+          .optional()
+          .default(false)
+          .describe(
+            "Must be explicitly set to true by the human operator to authorize this irreversible, cascading deletion."
+          ),
+      },
+      annotations: {
+        title: "Delete Group",
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: true,
       },
     },
     async (args) => {
+      // RQ-3008: consent boundary — group deletion cascades to all child rules,
+      // so refuse unless the human operator explicitly confirmed.
+      if (args.confirm !== true) {
+        return {
+          content: [
+            {
+              type: "text",
+              text:
+                `Confirmation required. This will PERMANENTLY delete group "${args.id}" ` +
+                `AND every rule inside it. This cannot be undone. To proceed, the human ` +
+                `operator must re-issue delete_group with the same id and confirm: true.`,
+            },
+          ],
+        };
+      }
       const apiKey = process.env.REQUESTLY_API_KEY;
       if (!apiKey) {
         return {

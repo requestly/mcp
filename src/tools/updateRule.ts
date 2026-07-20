@@ -8,9 +8,27 @@ export function registerUpdateRuleTool(server: McpServer) {
     {
       title: "Update Rule",
       description:
-        "Update an existing rule in Requestly. Requires ruleId and the updated rule payload.",
-      inputSchema: schema
-
+        "Update an existing rule in Requestly. Requires ruleId and the updated rule payload. " +
+        "Activating a Script/Request/Response rule (status: 'Active') runs code in the browser/request " +
+        "pipeline and requires confirmActivation: true — never set it on the user's behalf; a human must " +
+        "review the rule's script/code first.",
+      inputSchema: {
+        ...schema,
+        confirmActivation: z
+          .boolean()
+          .optional()
+          .default(false)
+          .describe(
+            "Must be set to true by the human operator to activate a code-bearing (Script/Request/Response) rule after they have reviewed the injected code."
+          ),
+      },
+      annotations: {
+        title: "Update Rule",
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true,
+      },
     },
     async (args: Record<string, unknown>): Promise<{ content: Array<{ type: "text"; text: string }> }> => {
       const apiKey = process.env.REQUESTLY_API_KEY;
@@ -37,6 +55,27 @@ export function registerUpdateRuleTool(server: McpServer) {
             ],
           };
         }
+        // RQ-3011: gate the dangerous Inactive->Active transition for code-bearing
+        // rule types behind explicit human confirmation. confirmActivation is read
+        // from the raw args (ruleSchema.parse strips unknown keys).
+        const CODE_BEARING_RULE_TYPES = new Set(["Script", "Request", "Response"]);
+        const willActivateCodeRule =
+          validatedArgs.status === "Active" &&
+          CODE_BEARING_RULE_TYPES.has(validatedArgs.ruleType as string);
+        if (willActivateCodeRule && args.confirmActivation !== true) {
+          return {
+            content: [
+              {
+                type: "text",
+                text:
+                  "Activation requires review. This rule injects code that will run in the " +
+                  "browser/request pipeline. Re-issue update_rule with confirmActivation: true " +
+                  "only after a human has reviewed the script/code.",
+              },
+            ],
+          };
+        }
+
         const { ruleId, ...rest } = validatedArgs;
         const body = { ...rest };
 
