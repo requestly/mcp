@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { REQUESTLY_API_BASE, apiErrorResult } from "../apiClient.js";
 
 export function registerGetGroupsTool(server: McpServer) {
   server.registerTool(
@@ -28,7 +29,7 @@ export function registerGetGroupsTool(server: McpServer) {
         const params = new URLSearchParams();
         if (typeof args.offset === "number") params.append("offset", String(args.offset));
         if (typeof args.pageSize === "number") params.append("pageSize", String(args.pageSize));
-        const response = await fetch(`https://api2.requestly.io/v1/groups?${params.toString()}`,
+        const response = await fetch(`${REQUESTLY_API_BASE}/groups?${params.toString()}`,
           {
             method: "GET",
             headers: {
@@ -37,6 +38,10 @@ export function registerGetGroupsTool(server: McpServer) {
             },
           }
         );
+        if (!response.ok) {
+          // RQ-3025: status only — never reflect the upstream body.
+          return await apiErrorResult("get groups", response);
+        }
         const data = await response.json();
         return {
           content: [

@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ruleSchema, schema, ValidatedRuleArgs } from "../types/updateRuleSchemas.js";
 import { z }from "zod";
+import { buildResourceUrl, apiErrorResult } from "../apiClient.js";
 
 export function registerUpdateRuleTool(server: McpServer) {
   server.registerTool(
@@ -79,7 +80,7 @@ export function registerUpdateRuleTool(server: McpServer) {
         const { ruleId, ...rest } = validatedArgs;
         const body = { ...rest };
 
-        const response = await fetch(`https://api2.requestly.io/v1/rules/${ruleId}`,
+        const response = await fetch(buildResourceUrl("rules", ruleId),
           {
             method: "PUT",
             headers: {
@@ -91,15 +92,8 @@ export function registerUpdateRuleTool(server: McpServer) {
           }
         );
         if (!response.ok) {
-          const errorText = await response.text();
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Failed to update rule: ${response.status} ${errorText}`,
-              },
-            ],
-          };
+          // RQ-3025: status only — never reflect the upstream body into LLM context.
+          return await apiErrorResult("update rule", response);
         }
         const data = await response.json();
         return {

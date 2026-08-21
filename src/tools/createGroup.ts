@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { REQUESTLY_API_BASE, apiErrorResult } from "../apiClient.js";
 
 export function registerCreateGroupTool(server: McpServer) {
   server.registerTool(
@@ -26,7 +27,7 @@ export function registerCreateGroupTool(server: McpServer) {
         };
       }
       try {
-        const response = await fetch("https://api2.requestly.io/v1/groups", {
+        const response = await fetch(`${REQUESTLY_API_BASE}/groups`, {
           method: "POST",
           headers: {
             "accept": "application/json",
@@ -35,6 +36,10 @@ export function registerCreateGroupTool(server: McpServer) {
           },
           body: JSON.stringify(args),
         });
+        if (!response.ok) {
+          // RQ-3025: status only — never reflect the upstream body.
+          return await apiErrorResult("create group", response);
+        }
         const data = await response.json();
         return {
           content: [
