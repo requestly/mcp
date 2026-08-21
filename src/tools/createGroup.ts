@@ -37,7 +37,6 @@ export function registerCreateGroupTool(server: McpServer) {
           body: JSON.stringify(args),
         });
         if (!response.ok) {
-          // RQ-3025: status only — never reflect the upstream body.
           return await apiErrorResult("create group", response);
         }
         const data = await response.json();

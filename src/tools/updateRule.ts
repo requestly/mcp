@@ -92,7 +92,6 @@ export function registerUpdateRuleTool(server: McpServer) {
           }
         );
         if (!response.ok) {
-          // RQ-3025: status only — never reflect the upstream body into LLM context.
           return await apiErrorResult("update rule", response);
         }
         const data = await response.json();

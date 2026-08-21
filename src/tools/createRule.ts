@@ -65,7 +65,6 @@ export function registerCreateRuleTool(server: McpServer) {
         body: JSON.stringify(body),
       });
     if (!response.ok) {
-      // RQ-3025: status only — never reflect the upstream body into LLM context.
       return await apiErrorResult('create rule', response);
     }
     const data = await response.json();

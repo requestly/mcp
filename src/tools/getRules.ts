@@ -50,7 +50,6 @@ export function registerGetRulesTool(server: McpServer) {
           },
         });
         if (!response.ok) {
-          // RQ-3025: status only — never reflect the upstream body into LLM context.
           return await apiErrorResult("get rules", response);
         }
         const data = await response.json();

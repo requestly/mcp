@@ -41,7 +41,6 @@ export function registerUpdateGroupTool(server: McpServer) {
           }
         );
         if (!response.ok) {
-          // RQ-3025: status only — never reflect the upstream body.
           return await apiErrorResult("update group", response);
         }
         const data = await response.json();

@@ -39,7 +39,6 @@ export function registerGetGroupsTool(server: McpServer) {
           }
         );
         if (!response.ok) {
-          // RQ-3025: status only — never reflect the upstream body.
           return await apiErrorResult("get groups", response);
         }
         const data = await response.json();

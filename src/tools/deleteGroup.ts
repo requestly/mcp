@@ -69,7 +69,6 @@ export function registerDeleteGroupTool(server: McpServer) {
           }
         );
         if (!response.ok) {
-          // RQ-3025: status only — never reflect the upstream body.
           return await apiErrorResult("delete group", response);
         }
         const data = await response.json();

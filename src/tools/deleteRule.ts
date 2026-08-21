@@ -67,9 +67,9 @@ export function registerDeleteRuleTool(server: McpServer) {
           }
         );
         if (!response.ok) {
-          // RQ-3025: the success path stringified the upstream body verbatim,
-          // which reflected API error payloads into LLM context just as the
-          // explicit error branches did.
+          // This handler had no error branch at all: response.json() was
+          // stringified straight to the LLM, leaking error bodies via the
+          // success path. Same for the other four group/delete handlers.
           return await apiErrorResult("delete rule", response);
         }
         const data = await response.json();
