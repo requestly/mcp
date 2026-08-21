@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { buildResourceUrl, apiErrorResult, resourceIdSchema } from "../apiClient.js";
 
 export function registerDeleteRuleTool(server: McpServer) {
   server.registerTool(
@@ -11,7 +12,7 @@ export function registerDeleteRuleTool(server: McpServer) {
         "Requires confirm: true. Never set confirm: true on the user's behalf — " +
         "first show the user the exact ruleId and get their explicit approval.",
       inputSchema: {
-        ruleId: z.string().describe("Unique identifier for the rule to delete."),
+        ruleId: resourceIdSchema.describe("Unique identifier for the rule to delete."),
         confirm: z
           .boolean()
           .optional()
@@ -56,7 +57,7 @@ export function registerDeleteRuleTool(server: McpServer) {
         };
       }
       try {
-        const response = await fetch(`https://api2.requestly.io/v1/rules/${args.ruleId}`,
+        const response = await fetch(buildResourceUrl("rules", args.ruleId),
           {
             method: "DELETE",
             headers: {
@@ -65,6 +66,12 @@ export function registerDeleteRuleTool(server: McpServer) {
             },
           }
         );
+        if (!response.ok) {
+          // RQ-3025: the success path stringified the upstream body verbatim,
+          // which reflected API error payloads into LLM context just as the
+          // explicit error branches did.
+          return await apiErrorResult("delete rule", response);
+        }
         const data = await response.json();
         return {
           content: [

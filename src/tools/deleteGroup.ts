@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { buildResourceUrl, apiErrorResult, resourceIdSchema } from "../apiClient.js";
 
 export function registerDeleteGroupTool(server: McpServer) {
   server.registerTool(
@@ -12,7 +13,7 @@ export function registerDeleteGroupTool(server: McpServer) {
         "Never set confirm: true on the user's behalf — first show the user the exact group " +
         "id and get their explicit approval.",
       inputSchema: {
-        id: z.string().describe("Unique identifier of the group to delete."),
+        id: resourceIdSchema.describe("Unique identifier of the group to delete."),
         confirm: z
           .boolean()
           .optional()
@@ -58,7 +59,7 @@ export function registerDeleteGroupTool(server: McpServer) {
       }
       try {
         const { id } = args;
-        const response = await fetch(`https://api2.requestly.io/v1/groups/${id}`,
+        const response = await fetch(buildResourceUrl("groups", id),
           {
             method: "DELETE",
             headers: {
@@ -67,6 +68,10 @@ export function registerDeleteGroupTool(server: McpServer) {
             },
           }
         );
+        if (!response.ok) {
+          // RQ-3025: status only — never reflect the upstream body.
+          return await apiErrorResult("delete group", response);
+        }
         const data = await response.json();
         return {
           content: [

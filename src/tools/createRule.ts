@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ruleSchema, schema, ValidatedRuleArgs } from "../types/createRuleSchemas.js";
+import { REQUESTLY_API_BASE, apiErrorResult } from "../apiClient.js";
 
 export function registerCreateRuleTool(server: McpServer) {
   server.registerTool(
@@ -55,7 +56,7 @@ export function registerCreateRuleTool(server: McpServer) {
         body.groupId = groupId;
       }
 
-      const response = await fetch('https://api2.requestly.io/v1/rules', {
+      const response = await fetch(`${REQUESTLY_API_BASE}/rules`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -64,15 +65,8 @@ export function registerCreateRuleTool(server: McpServer) {
         body: JSON.stringify(body),
       });
     if (!response.ok) {
-      const errorText = await response.text();
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `Failed to create rule: ${response.status} ${errorText}`,
-          },
-        ],
-      };
+      // RQ-3025: status only — never reflect the upstream body into LLM context.
+      return await apiErrorResult('create rule', response);
     }
     const data = await response.json();
     const note =

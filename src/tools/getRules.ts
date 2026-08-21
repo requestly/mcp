@@ -1,8 +1,9 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { REQUESTLY_API_BASE, buildResourceUrl, apiErrorResult, resourceIdSchema } from "../apiClient.js";
 
 export const getRulesInputSchema = {
-  ruleId: z.string().optional().describe("Unique ID of the rule to retrieve. If omitted, retrieves all rules."),
+  ruleId: resourceIdSchema.optional().describe("Unique ID of the rule to retrieve. If omitted, retrieves all rules."),
   offset: z.number().int().min(0).optional().describe("Index to start results from (for pagination)."),
   pageSize: z.number().int().min(1).max(75).optional().describe("Number of results to return (max 75)."),
 };
@@ -29,9 +30,9 @@ export function registerGetRulesTool(server: McpServer) {
         };
       }
       const { ruleId, offset, pageSize } = args;
-      let url = "https://api2.requestly.io/v1/rules";
+      let url = `${REQUESTLY_API_BASE}/rules`;
       if (ruleId) {
-        url += `/${encodeURIComponent(ruleId)}`;
+        url = buildResourceUrl("rules", ruleId);
       } else {
         const params = [];
         if (offset !== undefined) params.push(`offset=${offset}`);
@@ -49,15 +50,8 @@ export function registerGetRulesTool(server: McpServer) {
           },
         });
         if (!response.ok) {
-          const errorText = await response.text();
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Failed to get rules: ${response.status} ${errorText}`,
-              },
-            ],
-          };
+          // RQ-3025: status only — never reflect the upstream body into LLM context.
+          return await apiErrorResult("get rules", response);
         }
         const data = await response.json();
         return {

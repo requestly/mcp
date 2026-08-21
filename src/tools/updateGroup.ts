@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { buildResourceUrl, apiErrorResult, resourceIdSchema } from "../apiClient.js";
 
 export function registerUpdateGroupTool(server: McpServer) {
   server.registerTool(
@@ -8,7 +9,7 @@ export function registerUpdateGroupTool(server: McpServer) {
       title: "Update Group",
       description: "Update a specific group in Requestly.",
       inputSchema: {
-        id: z.string().describe("Unique identifier of the group to update."),
+        id: resourceIdSchema.describe("Unique identifier of the group to update."),
         name: z.string().describe("New name of the group."),
         status: z.enum(["Active", "Inactive"]).optional().default("Active"),
         isFavourite: z.boolean().optional().default(false),
@@ -28,7 +29,7 @@ export function registerUpdateGroupTool(server: McpServer) {
       }
       try {
         const { id, ...rest } = args;
-        const response = await fetch(`https://api2.requestly.io/v1/groups/${id}`,
+        const response = await fetch(buildResourceUrl("groups", id),
           {
             method: "PUT",
             headers: {
@@ -39,6 +40,10 @@ export function registerUpdateGroupTool(server: McpServer) {
             body: JSON.stringify(rest),
           }
         );
+        if (!response.ok) {
+          // RQ-3025: status only — never reflect the upstream body.
+          return await apiErrorResult("update group", response);
+        }
         const data = await response.json();
         return {
           content: [
