@@ -27,6 +27,9 @@ export function registerCreateGroupTool(server: McpServer) {
         };
       }
       try {
+        const { name, status, isFavourite } = args;
+        const body = { name, status, isFavourite };
+
         const response = await fetch(`${REQUESTLY_API_BASE}/groups`, {
           method: "POST",
           headers: {
@@ -34,7 +37,7 @@ export function registerCreateGroupTool(server: McpServer) {
             "content-type": "application/json",
             "x-api-key": apiKey,
           },
-          body: JSON.stringify(args),
+          body: JSON.stringify(body),
         });
         if (!response.ok) {
           // RQ-3025: status only — never reflect the upstream body.
@@ -62,3 +65,4 @@ export function registerCreateGroupTool(server: McpServer) {
     }
   );
 }
+

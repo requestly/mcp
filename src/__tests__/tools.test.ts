@@ -411,3 +411,92 @@ describe('Delete Rule Tool', () => {
     expect(globalThis.fetch as any).not.toHaveBeenCalled();
   });
 });
+
+describe('Group Tools', () => {
+  let originalFetch: typeof globalThis.fetch;
+  let originalEnv: string | undefined;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+    originalEnv = process.env.REQUESTLY_API_KEY;
+    process.env.REQUESTLY_API_KEY = 'test-api-key';
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ success: true, data: { id: 'grp_123' } }),
+    }) as any;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    process.env.REQUESTLY_API_KEY = originalEnv;
+  });
+
+  async function captureToolHandler(toolName: string, registerFn: (server: McpServer) => void) {
+    let toolHandler: Function | null = null;
+    const server = new McpServer({ name: 'test', version: '1.0.0' });
+    const origRegister = server.registerTool.bind(server);
+
+    server.registerTool = ((name: string, config: any, handler: any) => {
+      if (name === toolName) {
+        toolHandler = handler;
+      }
+      return origRegister(name, config, handler);
+    }) as any;
+
+    registerFn(server);
+    if (!toolHandler) throw new Error(`${toolName} handler not captured`);
+    return toolHandler;
+  }
+
+  it('create_group constructs clean payload', async () => {
+    const { registerCreateGroupTool } = await import('../tools/createGroup.js');
+    const handler = await captureToolHandler('create_group', registerCreateGroupTool);
+
+    await handler({ name: 'Test Group', status: 'Active', isFavourite: true, extraArg: 'leaked' });
+    const fetchCall = (globalThis.fetch as any).mock.calls[0];
+    expect(fetchCall[0]).toBe('https://api2.requestly.io/v1/groups');
+    expect(fetchCall[1].method).toBe('POST');
+    const body = JSON.parse(fetchCall[1].body);
+    expect(body).toEqual({ name: 'Test Group', status: 'Active', isFavourite: true });
+  });
+
+  it('get_groups fetches all groups or single group by groupId', async () => {
+    const { registerGetGroupsTool } = await import('../tools/getGroups.js');
+    const handler = await captureToolHandler('get_groups', registerGetGroupsTool);
+
+    // Fetch all groups
+    await handler({});
+    expect((globalThis.fetch as any).mock.calls[0][0]).toBe('https://api2.requestly.io/v1/groups');
+
+    // Fetch by groupId
+    await handler({ groupId: 'Group_123' });
+    expect((globalThis.fetch as any).mock.calls[1][0]).toBe('https://api2.requestly.io/v1/groups/Group_123');
+  });
+
+  it('update_group allows partial updates without forcing status or isFavourite defaults', async () => {
+    const { registerUpdateGroupTool } = await import('../tools/updateGroup.js');
+    const handler = await captureToolHandler('update_group', registerUpdateGroupTool);
+
+    await handler({ id: 'grp_123', name: 'Updated Name Only' });
+    const fetchCall = (globalThis.fetch as any).mock.calls[0];
+    expect(fetchCall[0]).toBe('https://api2.requestly.io/v1/groups/grp_123');
+    expect(fetchCall[1].method).toBe('PUT');
+    const body = JSON.parse(fetchCall[1].body);
+    expect(body).toEqual({ name: 'Updated Name Only' });
+    expect(body.status).toBeUndefined();
+    expect(body.isFavourite).toBeUndefined();
+  });
+
+  it('delete_group deletes group when confirm is true', async () => {
+    const { registerDeleteGroupTool } = await import('../tools/deleteGroup.js');
+    const handler = await captureToolHandler('delete_group', registerDeleteGroupTool);
+
+    const result = await handler({ id: 'grp_123', confirm: true });
+    expect(result.content[0].text).toContain('success');
+    const fetchCall = (globalThis.fetch as any).mock.calls[0];
+    expect(fetchCall[0]).toBe('https://api2.requestly.io/v1/groups/grp_123');
+    expect(fetchCall[1].method).toBe('DELETE');
+  });
+});
+
