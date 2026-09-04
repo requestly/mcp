@@ -10,9 +10,9 @@ export function registerUpdateGroupTool(server: McpServer) {
       description: "Update a specific group in Requestly.",
       inputSchema: {
         id: resourceIdSchema.describe("Unique identifier of the group to update."),
-        name: z.string().describe("New name of the group."),
-        status: z.enum(["Active", "Inactive"]).optional().default("Active"),
-        isFavourite: z.boolean().optional().default(false),
+        name: z.string().optional().describe("New name of the group."),
+        status: z.enum(["Active", "Inactive"]).optional().describe("Status of the group."),
+        isFavourite: z.boolean().optional().describe("Whether the group is marked as favourite."),
       },
     },
     async (args) => {
@@ -28,7 +28,12 @@ export function registerUpdateGroupTool(server: McpServer) {
         };
       }
       try {
-        const { id, ...rest } = args;
+        const { id, name, status, isFavourite } = args;
+        const body: Record<string, unknown> = {};
+        if (name !== undefined) body.name = name;
+        if (status !== undefined) body.status = status;
+        if (isFavourite !== undefined) body.isFavourite = isFavourite;
+
         const response = await fetch(buildResourceUrl("groups", id),
           {
             method: "PUT",
@@ -37,7 +42,7 @@ export function registerUpdateGroupTool(server: McpServer) {
               "content-type": "application/json",
               "x-api-key": apiKey,
             },
-            body: JSON.stringify(rest),
+            body: JSON.stringify(body),
           }
         );
         if (!response.ok) {
@@ -66,3 +71,4 @@ export function registerUpdateGroupTool(server: McpServer) {
     }
   );
 }
+
