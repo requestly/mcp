@@ -1,6 +1,6 @@
 {
   "name": "@requestly/mcp",
-  "version": "1.0.3",
+  "version": "1.0.5",
   "main": "build/index.js",
   "type": "module",
   "bin": {
@@ -21,6 +21,9 @@
   "author": "Requestly <contact@requestly.io>",
   "license": "MIT",
   "packageManager": "pnpm@9.15.9",
+  "engines": {
+    "node": "^22.23.4 || >=24.22.1"
+  },
   "description": "Requestly MCP server for rule and group management via stdio.",
   "devDependencies": {
     "@types/node": "^24.1.0",
