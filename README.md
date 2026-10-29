@@ -9,6 +9,9 @@ This project is a Model Context Protocol (MCP) server implemented in TypeScript 
 - Run as a stdio MCP server for integration with VS Code or other MCP clients
 
 
+## Requirements
+- Node.js 22.23.4+ or 24.22.1+. Older versions miss the October 2026 Node.js security fixes.
+
 ## Usage
 
 ### As an MCP server (for VS Code integration)
