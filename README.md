@@ -8,6 +8,13 @@ This project is a Model Context Protocol (MCP) server implemented in TypeScript 
 - Attach rules to groups
 - Run as a stdio MCP server for integration with VS Code or other MCP clients
 
+## Deleting rules and groups
+`delete_rule` and `delete_group` ask **you** to approve every delete before anything is removed. The approval prompt comes from your MCP host (for example Claude Code or VS Code) through [MCP elicitation](https://modelcontextprotocol.io/specification/2025-06-18/client/elicitation), so the AI model can't approve a delete on your behalf.
+
+- If you decline, cancel, or don't answer within 5 minutes, nothing is deleted.
+- If your host doesn't support elicitation, these tools can't delete; delete the rule or group in the [Requestly app](https://app.requestly.io/rules/my-rules) instead.
+- Deleting a group keeps the rules inside it; they stay in your workspace without a group.
+
 
 ## Requirements
 - Node.js 22.23.4+ or 24.22.1+. Older versions miss the October 2026 Node.js security fixes.

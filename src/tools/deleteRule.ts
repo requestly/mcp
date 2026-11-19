@@ -1,6 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { z } from "zod";
 import { buildResourceUrl, apiErrorResult, resourceIdSchema } from "../apiClient.js";
+import { askHumanToApprove, notApprovedText } from "../humanApproval.js";
 
 export function registerDeleteRuleTool(server: McpServer) {
   server.registerTool(
@@ -9,17 +9,11 @@ export function registerDeleteRuleTool(server: McpServer) {
       title: "Delete Rule",
       description:
         "Delete a specific rule in Requestly using its ruleId. IRREVERSIBLE. " +
-        "Requires confirm: true. Never set confirm: true on the user's behalf — " +
-        "first show the user the exact ruleId and get their explicit approval.",
+        "Before anything is deleted, the user is asked to approve it directly in the MCP host " +
+        "(an approval prompt the model cannot answer). If the user does not approve, or the host " +
+        "cannot show the prompt, nothing is deleted.",
       inputSchema: {
         ruleId: resourceIdSchema.describe("Unique identifier for the rule to delete."),
-        confirm: z
-          .boolean()
-          .optional()
-          .default(false)
-          .describe(
-            "Must be explicitly set to true by the human operator to authorize this irreversible deletion."
-          ),
       },
       annotations: {
         title: "Delete Rule",
@@ -29,22 +23,7 @@ export function registerDeleteRuleTool(server: McpServer) {
         openWorldHint: true,
       },
     },
-    async (args) => {
-      // RQ-3008: consent boundary — refuse irreversible deletion unless the human
-      // operator explicitly confirmed. Blocks prompt-injection-driven deletes.
-      if (args.confirm !== true) {
-        return {
-          content: [
-            {
-              type: "text",
-              text:
-                `Confirmation required. This will PERMANENTLY delete rule "${args.ruleId}". ` +
-                `This cannot be undone. To proceed, the human operator must re-issue ` +
-                `delete_rule with the same ruleId and confirm: true.`,
-            },
-          ],
-        };
-      }
+    async (args, extra) => {
       const apiKey = process.env.REQUESTLY_API_KEY;
       if (!apiKey) {
         return {
@@ -55,6 +34,18 @@ export function registerDeleteRuleTool(server: McpServer) {
             },
           ],
         };
+      }
+      // RQ-3008: the human approves each delete through the host (MCP elicitation).
+      // A model-supplied argument can never authorise it.
+      const what = `rule "${args.ruleId}"`;
+      const approval = await askHumanToApprove(
+        server,
+        `Permanently delete Requestly rule "${args.ruleId}"? This cannot be undone. ` +
+          `Check the rule in the Requestly app first if you're not sure what it is.`,
+        { relatedRequestId: extra?.requestId, signal: extra?.signal }
+      );
+      if (!approval.approved) {
+        return { content: [{ type: "text", text: notApprovedText(what, approval.reason) }] };
       }
       try {
         const response = await fetch(buildResourceUrl("rules", args.ruleId),

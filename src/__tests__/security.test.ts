@@ -71,30 +71,8 @@ describe('RQ-3018 — resource ids cannot traverse out of their collection', () 
     }
   });
 
-  it('delete_rule never issues a DELETE against /groups/', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      statusText: 'OK',
-      json: () => Promise.resolve({ success: true }),
-    });
-    const originalFetch = globalThis.fetch;
-    const originalEnv = process.env.REQUESTLY_API_KEY;
-    globalThis.fetch = fetchMock as any;
-    process.env.REQUESTLY_API_KEY = 'test-api-key';
-    try {
-      const { registerDeleteRuleTool } = await import('../tools/deleteRule.js');
-      const handler = await captureHandler('delete_rule', registerDeleteRuleTool);
-      await handler({ ruleId: TRAVERSAL_ID, confirm: true });
-
-      const calledUrl = fetchMock.mock.calls[0][0] as string;
-      expect(calledUrl).not.toContain('/groups/VICTIM_GROUP_ID');
-      expect(calledUrl).toContain('..%2Fgroups%2FVICTIM_GROUP_ID');
-    } finally {
-      globalThis.fetch = originalFetch;
-      process.env.REQUESTLY_API_KEY = originalEnv;
-    }
-  });
+  // delete_rule / delete_group traversal ids: see deleteApproval.test.ts, where the
+  // call goes through the human-approval flow (RQ-3008) before any request is made.
 });
 
 describe('RQ-3025 — upstream error bodies never reach LLM context', () => {
@@ -122,7 +100,8 @@ describe('RQ-3025 — upstream error bodies never reach LLM context', () => {
     errorSpy.mockRestore();
   });
 
-  // Every handler that performs an HTTP call. The last five previously leaked the
+  // Every handler that performs an HTTP call without a human-approval step
+  // (delete_rule / delete_group are covered in deleteApproval.test.ts). Several previously leaked the
   // body through the SUCCESS path — they called response.json() without checking
   // response.ok and stringified whatever came back.
   const cases: Array<{
@@ -137,10 +116,6 @@ describe('RQ-3025 — upstream error bodies never reach LLM context', () => {
       args: { ruleId: 'rule_1', ruleType: 'Cancel', pairs: [{ source: validSource }] } },
     { tool: 'get_rules', module: '../tools/getRules.js', register: 'registerGetRulesTool',
       args: { ruleId: 'rule_1' } },
-    { tool: 'delete_rule', module: '../tools/deleteRule.js', register: 'registerDeleteRuleTool',
-      args: { ruleId: 'rule_1', confirm: true } },
-    { tool: 'delete_group', module: '../tools/deleteGroup.js', register: 'registerDeleteGroupTool',
-      args: { id: 'grp_1', confirm: true } },
     { tool: 'update_group', module: '../tools/updateGroup.js', register: 'registerUpdateGroupTool',
       args: { id: 'grp_1', name: 'n' } },
     { tool: 'create_group', module: '../tools/createGroup.js', register: 'registerCreateGroupTool',
