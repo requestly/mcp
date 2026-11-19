@@ -39,7 +39,7 @@ function text(result: any): string {
   return (result.content ?? []).map((b: any) => b.text).join('\n');
 }
 
-const approve: Answer = () => ({ action: 'accept', content: { confirm: true } });
+const approve: Answer = () => ({ action: 'accept', content: {} });
 
 const tools = [
   { tool: 'delete_rule', args: { ruleId: 'Redirect_abc12' }, id: 'Redirect_abc12', path: '/rules/Redirect_abc12' },
@@ -94,7 +94,6 @@ describe('RQ-3008 — deletes need the human to approve in the host', () => {
       for (const [label, answer] of [
         ['declines', () => ({ action: 'decline' })],
         ['cancels', () => ({ action: 'cancel' })],
-        ['submits without ticking confirm', () => ({ action: 'accept', content: { confirm: false } })],
       ] as Array<[string, Answer]>) {
         it(`deletes nothing when the human ${label}`, async () => {
           const h = await connect({ elicitation: true, answer });
@@ -149,12 +148,21 @@ describe('RQ-3008 — deletes need the human to approve in the host', () => {
         }
       });
 
-      it('deletes nothing when the host returns an answer that does not match the form', async () => {
-        const h = await connect({ elicitation: true, answer: () => ({ action: 'accept', content: { confirm: 'yes' } }) });
+      it('asks with Accept / Decline only — no extra checkbox', async () => {
+        const h = await connect({ elicitation: true, answer: approve });
         try {
-          const result: any = await h.client.callTool({ name: t.tool, arguments: t.args });
-          expect(fetchMock).not.toHaveBeenCalled();
-          expect(text(result)).toContain('Not deleted');
+          await h.client.callTool({ name: t.tool, arguments: t.args });
+          expect(h.prompts[0].requestedSchema.properties).toEqual({});
+        } finally {
+          await h.close();
+        }
+      });
+
+      it('approves when the host returns accept without any content', async () => {
+        const h = await connect({ elicitation: true, answer: () => ({ action: 'accept' }) });
+        try {
+          await h.client.callTool({ name: t.tool, arguments: t.args });
+          expect(fetchMock).toHaveBeenCalledTimes(1);
         } finally {
           await h.close();
         }

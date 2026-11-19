@@ -9,7 +9,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
  * this server to the host and its answer comes back here; it never passes through
  * the model, so the model cannot answer it.
  *
- * Anything other than an explicit "accept" with `confirm: true` counts as "no":
+ * Anything other than an explicit "accept" counts as "no":
  * decline, cancel, a timeout, an error, or a host that does not support elicitation.
  */
 
@@ -33,22 +33,14 @@ export async function askHumanToApprove(
       {
         mode: "form",
         message,
-        requestedSchema: {
-          type: "object",
-          properties: {
-            confirm: {
-              type: "boolean",
-              title: "Yes, delete it",
-              description: "Tick to permanently delete. This cannot be undone.",
-              default: false,
-            },
-          },
-          required: ["confirm"],
-        },
+        // No form fields: the host shows the message with Accept / Decline, and
+        // Accept itself is the approval. (A checkbox on top of Accept was a
+        // redundant second step.)
+        requestedSchema: { type: "object", properties: {} },
       },
       { timeout: APPROVAL_TIMEOUT_MS, relatedRequestId: options.relatedRequestId }
     );
-    if (result.action === "accept" && result.content?.confirm === true) {
+    if (result.action === "accept") {
       return { approved: true };
     }
     return { approved: false, reason: result.action === "cancel" ? "cancelled" : "declined" };
