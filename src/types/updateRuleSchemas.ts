@@ -43,7 +43,7 @@ function updateRuleSchema<T extends z.infer<typeof RuleTypeEnum>>(
 const createMCPCompatibleSchema = () => {
   // Base fields that are common to all rules
   const baseFields = {
-    ruleId: resourceIdSchema.describe('Unique identifier for the rule.').optional(),
+    ruleId: resourceIdSchema.describe('Unique identifier for the rule.'),
     name: z.string().describe('Name of the rule.').optional(),
     description: z.string().optional().describe('Description of the rule.'),
     ruleType: z

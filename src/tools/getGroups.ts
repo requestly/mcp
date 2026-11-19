@@ -1,19 +1,23 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { REQUESTLY_API_BASE, apiErrorResult } from "../apiClient.js";
+import { REQUESTLY_API_BASE, buildResourceUrl, apiErrorResult, resourceIdSchema } from "../apiClient.js";
+
+export const getGroupsInputSchema = {
+  groupId: resourceIdSchema.optional().describe("Unique ID of the group to retrieve. If omitted, retrieves all groups."),
+  offset: z.number().int().min(0).optional().describe("Index to start results from (for pagination)."),
+  pageSize: z.number().int().min(1).max(75).optional().describe("Number of results to return (max 75)."),
+};
 
 export function registerGetGroupsTool(server: McpServer) {
   server.registerTool(
     "get_groups",
     {
       title: "Get Groups",
-      description: "Get all groups in Requestly.",
-      inputSchema: {
-        offset: z.number().optional().default(0),
-        pageSize: z.number().optional().default(30),
-      },
+      description:
+        "Retrieve all groups or a specific group from Requestly using its API. Supports pagination and lookup by groupId.",
+      inputSchema: getGroupsInputSchema,
     },
-    async (args)=> {
+    async (args) => {
       const apiKey = process.env.REQUESTLY_API_KEY;
       if (!apiKey) {
         return {
@@ -25,19 +29,26 @@ export function registerGetGroupsTool(server: McpServer) {
           ],
         };
       }
+      const { groupId, offset, pageSize } = args;
+      let url = `${REQUESTLY_API_BASE}/groups`;
+      if (groupId) {
+        url = buildResourceUrl("groups", groupId);
+      } else {
+        const params = [];
+        if (offset !== undefined) params.push(`offset=${offset}`);
+        if (pageSize !== undefined) params.push(`pageSize=${pageSize}`);
+        if (params.length > 0) {
+          url += `?${params.join("&")}`;
+        }
+      }
       try {
-        const params = new URLSearchParams();
-        if (typeof args.offset === "number") params.append("offset", String(args.offset));
-        if (typeof args.pageSize === "number") params.append("pageSize", String(args.pageSize));
-        const response = await fetch(`${REQUESTLY_API_BASE}/groups?${params.toString()}`,
-          {
-            method: "GET",
-            headers: {
-              "accept": "application/json",
-              "x-api-key": apiKey,
-            },
-          }
-        );
+        const response = await fetch(url, {
+          method: "GET",
+          headers: {
+            "accept": "application/json",
+            "x-api-key": apiKey,
+          },
+        });
         if (!response.ok) {
           // RQ-3025: status only — never reflect the upstream body.
           return await apiErrorResult("get groups", response);
@@ -64,3 +75,4 @@ export function registerGetGroupsTool(server: McpServer) {
     }
   );
 }
+
