@@ -23,7 +23,7 @@ export const APPROVAL_TIMEOUT_MS = 5 * 60 * 1000;
 export async function askHumanToApprove(
   server: McpServer,
   message: string,
-  options: { relatedRequestId?: string | number } = {}
+  options: { relatedRequestId?: string | number; signal?: AbortSignal } = {}
 ): Promise<ApprovalOutcome> {
   if (!server.server.getClientCapabilities()?.elicitation?.form) {
     return { approved: false, reason: "unsupported" };
@@ -38,7 +38,9 @@ export async function askHumanToApprove(
         // redundant second step.)
         requestedSchema: { type: "object", properties: {} },
       },
-      { timeout: APPROVAL_TIMEOUT_MS, relatedRequestId: options.relatedRequestId }
+      // The caller's abort signal: if the tool call is cancelled while the prompt is
+      // open, a late "accept" must not delete anything.
+      { timeout: APPROVAL_TIMEOUT_MS, relatedRequestId: options.relatedRequestId, signal: options.signal }
     );
     if (result.action === "accept") {
       return { approved: true };

@@ -42,7 +42,7 @@ export function registerDeleteRuleTool(server: McpServer) {
         server,
         `Permanently delete Requestly rule "${args.ruleId}"? This cannot be undone. ` +
           `Check the rule in the Requestly app first if you're not sure what it is.`,
-        { relatedRequestId: extra?.requestId }
+        { relatedRequestId: extra?.requestId, signal: extra?.signal }
       );
       if (!approval.approved) {
         return { content: [{ type: "text", text: notApprovedText(what, approval.reason) }] };

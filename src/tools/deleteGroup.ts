@@ -43,7 +43,7 @@ export function registerDeleteGroupTool(server: McpServer) {
         server,
         `Permanently delete Requestly group "${args.id}"? This cannot be undone. ` +
           `The rules inside it are kept, without a group.`,
-        { relatedRequestId: extra?.requestId }
+        { relatedRequestId: extra?.requestId, signal: extra?.signal }
       );
       if (!approval.approved) {
         return { content: [{ type: "text", text: notApprovedText(what, approval.reason) }] };

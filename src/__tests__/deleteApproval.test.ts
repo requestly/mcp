@@ -16,12 +16,12 @@ import { registerTools } from '../tools/index.js';
 
 type Answer = (params: any) => any;
 
-async function connect(opts: { elicitation: boolean; answer?: Answer }) {
+async function connect(opts: { elicitation: boolean; answer?: Answer; capabilities?: Record<string, unknown> }) {
   const server = new McpServer({ name: 'requestly-mcp-test', version: '1.0.0' });
   registerTools(server);
   const client = new Client(
     { name: 'test-host', version: '1.0.0' },
-    { capabilities: opts.elicitation ? { elicitation: {} } : {} }
+    { capabilities: opts.capabilities ?? (opts.elicitation ? { elicitation: {} } : {}) }
   );
   const prompts: any[] = [];
   if (opts.elicitation) {
@@ -127,6 +127,54 @@ describe('RQ-3008 — deletes need the human to approve in the host', () => {
           expect(fetchMock).not.toHaveBeenCalled();
           expect(text(result)).toContain("can't ask the user to approve");
           expect(text(result)).toContain('Requestly app');
+        } finally {
+          await h.close();
+        }
+      });
+
+      it('treats a host that declares an empty elicitation capability as able to ask', async () => {
+        // MCP defines `elicitation: {}` as form support; the SDK normalises it on initialize.
+        const h = await connect({ elicitation: true, capabilities: { elicitation: {} }, answer: approve });
+        try {
+          await h.client.callTool({ name: t.tool, arguments: t.args });
+          expect(h.prompts).toHaveLength(1);
+          expect(fetchMock).toHaveBeenCalledTimes(1);
+        } finally {
+          await h.close();
+        }
+      });
+
+      it('deletes nothing when the host only supports URL-mode prompts', async () => {
+        const h = await connect({ elicitation: false, capabilities: { elicitation: { url: {} } } });
+        try {
+          const result: any = await h.client.callTool({ name: t.tool, arguments: t.args });
+          expect(fetchMock).not.toHaveBeenCalled();
+          expect(text(result)).toContain("can't ask the user to approve");
+        } finally {
+          await h.close();
+        }
+      });
+
+      it('deletes nothing if the call is cancelled while the prompt is still open', async () => {
+        const caller = new AbortController();
+        let release!: () => void;
+        const hostAnswersLate = new Promise<void>((r) => (release = r));
+        const h = await connect({
+          elicitation: true,
+          answer: async () => {
+            caller.abort(); // the user/host cancels the tool call while the prompt is open
+            await hostAnswersLate; // ...and the prompt is then accepted anyway
+            return { action: 'accept', content: {} };
+          },
+        });
+        try {
+          await expect(
+            h.client.callTool({ name: t.tool, arguments: t.args }, undefined, { signal: caller.signal })
+          ).rejects.toThrow();
+          await new Promise((r) => setTimeout(r, 20));
+          release();
+          await new Promise((r) => setTimeout(r, 50));
+          expect(fetchMock).not.toHaveBeenCalled();
         } finally {
           await h.close();
         }
