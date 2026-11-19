@@ -1,6 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { z } from "zod";
 import { buildResourceUrl, apiErrorResult, resourceIdSchema } from "../apiClient.js";
+import { askHumanToApprove, notApprovedText } from "../humanApproval.js";
 
 export function registerDeleteGroupTool(server: McpServer) {
   server.registerTool(
@@ -8,19 +8,13 @@ export function registerDeleteGroupTool(server: McpServer) {
     {
       title: "Delete Group",
       description:
-        "Delete a specific group in Requestly using its id. IRREVERSIBLE and CASCADES " +
-        "— deleting a group also deletes every rule it contains. Requires confirm: true. " +
-        "Never set confirm: true on the user's behalf — first show the user the exact group " +
-        "id and get their explicit approval.",
+        "Delete a specific group in Requestly using its id. IRREVERSIBLE. The rules inside the " +
+        "group are not deleted; they stay in the workspace without a group. " +
+        "Before anything is deleted, the user is asked to approve it directly in the MCP host " +
+        "(an approval prompt the model cannot answer). If the user does not approve, or the host " +
+        "cannot show the prompt, nothing is deleted.",
       inputSchema: {
         id: resourceIdSchema.describe("Unique identifier of the group to delete."),
-        confirm: z
-          .boolean()
-          .optional()
-          .default(false)
-          .describe(
-            "Must be explicitly set to true by the human operator to authorize this irreversible, cascading deletion."
-          ),
       },
       annotations: {
         title: "Delete Group",
@@ -30,22 +24,7 @@ export function registerDeleteGroupTool(server: McpServer) {
         openWorldHint: true,
       },
     },
-    async (args) => {
-      // RQ-3008: consent boundary — group deletion cascades to all child rules,
-      // so refuse unless the human operator explicitly confirmed.
-      if (args.confirm !== true) {
-        return {
-          content: [
-            {
-              type: "text",
-              text:
-                `Confirmation required. This will PERMANENTLY delete group "${args.id}" ` +
-                `AND every rule inside it. This cannot be undone. To proceed, the human ` +
-                `operator must re-issue delete_group with the same id and confirm: true.`,
-            },
-          ],
-        };
-      }
+    async (args, extra) => {
       const apiKey = process.env.REQUESTLY_API_KEY;
       if (!apiKey) {
         return {
@@ -57,9 +36,20 @@ export function registerDeleteGroupTool(server: McpServer) {
           ],
         };
       }
+      // RQ-3008: the human approves each delete through the host (MCP elicitation).
+      // A model-supplied argument can never authorise it.
+      const what = `group "${args.id}"`;
+      const approval = await askHumanToApprove(
+        server,
+        `Permanently delete Requestly group "${args.id}"? This cannot be undone. ` +
+          `The rules inside it are kept, without a group.`,
+        { relatedRequestId: extra?.requestId }
+      );
+      if (!approval.approved) {
+        return { content: [{ type: "text", text: notApprovedText(what, approval.reason) }] };
+      }
       try {
-        const { id } = args;
-        const response = await fetch(buildResourceUrl("groups", id),
+        const response = await fetch(buildResourceUrl("groups", args.id),
           {
             method: "DELETE",
             headers: {
