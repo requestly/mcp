@@ -66,7 +66,7 @@ function describeSource(source: any): string {
 /** Everything a person reads for an item: its value, then its tag attributes. */
 function shownText(item: CodeItem): string {
   const attrs = item.attributes?.length
-    ? "\n" + item.attributes.map((a) => `[tag attribute] ${a.name}=${a.value}`).join("\n")
+    ? "\n" + item.attributes.map((a) => `[tag attribute] ${JSON.stringify(a)}`).join("\n")
     : "";
   return item.value + attrs;
 }
@@ -159,8 +159,8 @@ function fitsInline(item: CodeItem): boolean {
  *   === start of code <nonce> ===
  *   --- item 1 of 2 <nonce>: <label>; runs on <where> ---
  *   <value>
- *   --- tag attributes of item 1 <nonce>: one name=value per line ---
- *   <name>=<value>
+ *   --- tag attributes of item 1 <nonce>: one {"name","value"} JSON object per line ---
+ *   {"name":"onload","value":"init()"}
  *   --- item 2 of 2 <nonce>: ... ---
  *   <value>
  *   === end of code <nonce> ===
@@ -169,7 +169,7 @@ function itemHeader(i: number, n: number, nonce: string, item: CodeItem): string
   return `--- item ${i} of ${n} ${nonce}: ${item.label}; runs on ${item.where} ---`;
 }
 function attrHeader(i: number, nonce: string): string {
-  return `--- tag attributes of item ${i} ${nonce}: one name=value per line ---`;
+  return `--- tag attributes of item ${i} ${nonce}: one {"name","value"} JSON object per line ---`;
 }
 
 function renderEditable(items: CodeItem[], nonce: string): string {
@@ -177,7 +177,8 @@ function renderEditable(items: CodeItem[], nonce: string): string {
   items.forEach((item, idx) => {
     out.push(itemHeader(idx + 1, items.length, nonce, item), item.value);
     if (item.attributes) {
-      out.push(attrHeader(idx + 1, nonce), ...item.attributes.map((a) => `${a.name}=${a.value}`));
+      // JSON per attribute, so any name or value (with "=", line breaks...) reads back exactly.
+      out.push(attrHeader(idx + 1, nonce), ...item.attributes.map((a) => JSON.stringify({ name: a.name, value: a.value })));
     }
   });
   out.push(`=== end of code ${nonce} ===`);
@@ -187,12 +188,14 @@ function renderEditable(items: CodeItem[], nonce: string): string {
 /** Read the code back out of the (possibly edited) review file; undefined if its markers are broken. */
 export function parseEditable(text: string, items: CodeItem[], nonce: string): AcceptedCode[] | undefined {
   const lines = text.split("\n");
-  const start = lines.indexOf(`=== start of code ${nonce} ===`);
-  const end = lines.indexOf(`=== end of code ${nonce} ===`);
+  // Marker lines are matched ignoring a trailing CR; code lines are kept exactly.
+  const bare = (l: string) => l.replace(/\r$/, "");
+  const start = lines.findIndex((l) => bare(l) === `=== start of code ${nonce} ===`);
+  const end = lines.findIndex((l) => bare(l) === `=== end of code ${nonce} ===`);
   if (start < 0 || end < start) return undefined;
   const body = lines.slice(start + 1, end);
-  const isItem = (l: string) => new RegExp(`^--- item (\\d+) of (\\d+) ${nonce}: .* ---$`).exec(l);
-  const isAttr = (l: string) => new RegExp(`^--- tag attributes of item (\\d+) ${nonce}: .* ---$`).exec(l);
+  const isItem = (l: string) => new RegExp(`^--- item (\\d+) of (\\d+) ${nonce}: .* ---$`).exec(bare(l));
+  const isAttr = (l: string) => new RegExp(`^--- tag attributes of item (\\d+) ${nonce}: .* ---$`).exec(bare(l));
   const result: AcceptedCode[] = [];
   let i = 0;
   while (i < body.length) {
@@ -208,11 +211,16 @@ export function parseEditable(text: string, items: CodeItem[], nonce: string): A
       i++;
       const attributes: Attribute[] = [];
       while (i < body.length && !isItem(body[i])) {
-        const line = body[i++];
-        if (line === "") continue;
-        const eq = line.indexOf("=");
-        if (eq <= 0) return undefined;
-        attributes.push({ name: line.slice(0, eq), value: line.slice(eq + 1) });
+        const line = bare(body[i++]);
+        if (line.trim() === "") continue;
+        let a: any;
+        try {
+          a = JSON.parse(line);
+        } catch {
+          return undefined;
+        }
+        if (!a || typeof a.name !== "string" || typeof a.value !== "string") return undefined;
+        attributes.push({ name: a.name, value: a.value });
       }
       entry.attributes = attributes;
     } else if (item?.attributes) {
@@ -352,8 +360,11 @@ export async function askHumanToAcceptCode(
     } catch {
       return { approved: false, reason: "file-unreadable" };
     }
-    // An editor may save with Windows line endings; the original had none.
-    if (!review.includes("\r")) text = text.replace(/\r\n/g, "\n");
+    // An editor may have re-saved the whole file with Windows line endings (no bare
+    // LF left, where the original had some): undo that. An unchanged file, even one
+    // whose code contains CRLF, is left exactly as written.
+    const hasBareLF = (t: string) => /(^|[^\r])\n/.test(t);
+    if (text !== review && !hasBareLF(text) && hasBareLF(review)) text = text.replace(/\r\n/g, "\n");
     const accepted = parseEditable(text, req.added, nonce);
     if (!accepted) return { approved: false, reason: "file-unreadable" };
     const edited = accepted.some(

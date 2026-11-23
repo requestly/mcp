@@ -581,13 +581,58 @@ describe('RQ-3011 / RQ-3021 — code in rules needs the human to accept it in th
         }
       });
 
+      it('reads tag attributes back exactly, even with "=" in a name or a line break in a value', async () => {
+        const odd = [{ name: 'data-a=b', value: 'x' }, { name: 'onload', value: 'first()\nsecond=2' }];
+        const withAttr = [{ source: src, scripts: [{ codeType: 'js', type: 'url', loadTime: 'afterPageLoad', value: 'https://cdn.example.com/a.js', attributes: odd }] }];
+        const h = await connect({ elicitation: true, answer: approve });
+        try {
+          await h.client.callTool({ name: 'create_rule', arguments: { ...args, pairs: withAttr } });
+          expect(writes()).toHaveLength(1);
+          expect(sentBody().pairs[0].scripts[0].attributes).toEqual(odd);
+        } finally {
+          await h.close();
+        }
+      });
+
+      it('keeps CRLF inside the code exactly when the file is unchanged', async () => {
+        const crlf = 'a();\r\nb();';
+        const h = await connect({ elicitation: true, answer: approve });
+        try {
+          await h.client.callTool({ name: 'create_rule', arguments: { ...args, pairs: [script.pair(crlf)] } });
+          expect(sentBody().pairs[0].scripts[0].value).toBe(crlf);
+        } finally {
+          await h.close();
+        }
+      });
+
+      it('still reads the file when the code has CRLF and an editor re-saved the whole file with CRLF', async () => {
+        const crlf = 'a();\r\nb();';
+        const h = await connect({
+          elicitation: true,
+          answer: (p) => {
+            const path = reviewPath(p.message)!;
+            const t = readFileSync(path, 'utf8').replace(/\r?\n/g, '\r\n').replace('b();', 'c();');
+            writeFileSync(path, t);
+            return { action: 'accept', content: {} };
+          },
+        });
+        try {
+          const result: any = await h.client.callTool({ name: 'create_rule', arguments: { ...args, pairs: [script.pair(crlf)] } });
+          expect(writes()).toHaveLength(1);
+          expect(sentBody().pairs[0].scripts[0].value).toBe('a();\nc();');
+          expect(text(result)).toContain('the user edited the code');
+        } finally {
+          await h.close();
+        }
+      });
+
       it('lets the user edit tag attributes too', async () => {
         const withAttr = [{ source: src, scripts: [{ codeType: 'js', type: 'url', loadTime: 'afterPageLoad', value: 'https://cdn.example.com/a.js', attributes: [{ name: 'onload', value: 'init()' }] }] }];
         const h = await connect({
           elicitation: true,
           answer: (p) => {
             const path = reviewPath(p.message)!;
-            writeFileSync(path, readFileSync(path, 'utf8').replace('onload=init()', 'onload=initSafely()\ndefer=true'));
+            writeFileSync(path, readFileSync(path, 'utf8').replace('{"name":"onload","value":"init()"}', '{"name":"onload","value":"initSafely()"}\n{"name":"defer","value":"true"}'));
             return { action: 'accept', content: {} };
           },
         });
