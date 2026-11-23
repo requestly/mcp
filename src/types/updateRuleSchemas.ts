@@ -27,8 +27,7 @@ function updateRuleSchema<T extends z.infer<typeof RuleTypeEnum>>(
     status: z
       .enum(['Active', 'Inactive'])
       .optional()
-      .default('Active')
-      .describe('Status of the rule.'),
+      .describe('Status of the rule. Leave out to keep the current status.'),
     pairs: z
       .array(pairSchema)
       .optional()
@@ -65,8 +64,7 @@ const createMCPCompatibleSchema = () => {
     status: z
       .enum(['Active', 'Inactive'])
       .optional()
-      .default('Active')
-      .describe('Status of the rule.'),
+      .describe('Status of the rule. Leave out to keep the current status.'),
     objectType: z
       .literal('rule')
       .describe('Type of the object, always "rule".').default("rule"),
@@ -98,8 +96,8 @@ const createMCPCompatibleSchema = () => {
 
   return {
     ...baseFields,
-    pairs: z.array(z.unknown()).describe(
-      `List of rule pair objects. Structure depends on ruleType:
+    pairs: z.array(z.unknown()).optional().describe(
+      `Leave out to keep the saved pairs. List of rule pair objects. Structure depends on ruleType:
       
       - Redirect: ${pairDescriptions.Redirect}
       - Cancel: ${pairDescriptions.Cancel}

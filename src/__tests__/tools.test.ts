@@ -176,7 +176,12 @@ describe('Create Rule Tool - Schema Validation per Rule Type', () => {
     },
   ];
 
-  for (const tc of ruleTestCases) {
+  // Script, Request and Response rules carry code: they are saved only after the
+  // user accepts the code in the host, which needs a connected client. Those paths
+  // are covered end to end in codeApproval.test.ts.
+  const CODE_RULE_TYPES = ['Script', 'Request', 'Response'];
+
+  for (const tc of ruleTestCases.filter((t) => !CODE_RULE_TYPES.includes(t.name))) {
     it(`creates ${tc.name} rule successfully`, async () => {
       const result = await callCreateRuleTool(tc.args);
       expect(result.content[0].type).toBe('text');
@@ -195,6 +200,14 @@ describe('Create Rule Tool - Schema Validation per Rule Type', () => {
       expect(body.ruleType).toBe(tc.args.ruleType);
       expect(body.name).toBe(tc.args.name);
       expect(body.objectType).toBe('rule');
+    });
+  }
+
+  for (const tc of ruleTestCases.filter((t) => CODE_RULE_TYPES.includes(t.name))) {
+    it(`does not save a ${tc.name} rule when no host can ask the user to accept its code`, async () => {
+      const result = await callCreateRuleTool(tc.args);
+      expect(result.content[0].text).toContain('Not saved');
+      expect((globalThis.fetch as any).mock.calls).toHaveLength(0);
     });
   }
 
@@ -237,9 +250,13 @@ describe('Update Rule Tool - Schema Validation', () => {
     originalEnv = process.env.REQUESTLY_API_KEY;
     process.env.REQUESTLY_API_KEY = 'test-api-key';
 
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ success: true }),
+    // update_rule reads the saved rule first (GET), then writes the merged rule (PUT).
+    globalThis.fetch = vi.fn(async (url: string, init: any = {}) => {
+      const id = String(url).split('/').pop()!;
+      const data = (init.method ?? 'GET') === 'GET'
+        ? { id, name: 'Saved', ruleType: id.split('_')[0], status: 'Inactive', pairs: [{ source: validSource }] }
+        : { id };
+      return { ok: true, json: () => Promise.resolve({ success: true, data }) };
     }) as any;
   });
 
