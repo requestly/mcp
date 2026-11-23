@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
@@ -23,6 +25,17 @@ import { registerTools } from '../tools/index.js';
 
 type Answer = (params: any) => any;
 
+/** The review file a prompt names (~ = $HOME), if any. */
+function reviewPath(message: string): string | undefined {
+  const m = message.match(/(~\/\.requestly-mcp\/review\/[0-9a-f]+\.txt)/);
+  return m ? m[1].replace(/^~/, process.env.HOME!) : undefined;
+}
+
+/** Everything the user can read for a prompt: its message plus the review file it names (read while open). */
+function seen(prompt: any): string {
+  return `${prompt.message}\n${prompt.file ?? ''}`;
+}
+
 async function connect(opts: { elicitation: boolean; answer?: Answer; capabilities?: Record<string, unknown> }) {
   const server = new McpServer({ name: 'requestly-mcp-test', version: '1.0.0' });
   registerTools(server);
@@ -33,7 +46,9 @@ async function connect(opts: { elicitation: boolean; answer?: Answer; capabiliti
   const prompts: any[] = [];
   if (opts.elicitation) {
     client.setRequestHandler(ElicitRequestSchema, async (req) => {
-      prompts.push(req.params);
+      const path = reviewPath(req.params.message as string);
+      const file = path && existsSync(path) ? readFileSync(path, 'utf8') : undefined;
+      prompts.push({ ...req.params, path, file });
       return opts.answer!(req.params);
     });
   }
@@ -104,6 +119,8 @@ describe('RQ-3011 / RQ-3021 — code in rules needs the human to accept it in th
   let errorSpy: ReturnType<typeof vi.spyOn>;
   /** What GET /rules/:id returns: the rule as currently saved. */
   let saved: any;
+  let originalHome: string | undefined;
+  let home: string;
 
   const writes = () => fetchMock.mock.calls.filter((c: any[]) => (c[1]?.method ?? 'GET') !== 'GET');
   const sentBody = (i = 0) => JSON.parse(writes()[i][1].body);
@@ -113,6 +130,9 @@ describe('RQ-3011 / RQ-3021 — code in rules needs the human to accept it in th
     originalEnv = process.env.REQUESTLY_API_KEY;
     process.env.REQUESTLY_API_KEY = 'test-api-key';
     errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    originalHome = process.env.HOME;
+    home = mkdtempSync(join(tmpdir(), 'rq-home-'));
+    process.env.HOME = home;
     saved = undefined;
     fetchMock = vi.fn(async (_url: string, init: any = {}) => {
       const method = init.method ?? 'GET';
@@ -131,6 +151,8 @@ describe('RQ-3011 / RQ-3021 — code in rules needs the human to accept it in th
   afterEach(() => {
     globalThis.fetch = originalFetch;
     process.env.REQUESTLY_API_KEY = originalEnv;
+    process.env.HOME = originalHome;
+    rmSync(home, { recursive: true, force: true });
     errorSpy.mockRestore();
   });
 
@@ -155,7 +177,7 @@ describe('RQ-3011 / RQ-3021 — code in rules needs the human to accept it in th
         try {
           const result: any = await h.client.callTool({ name: 'create_rule', arguments: createArgs });
           expect(h.prompts).toHaveLength(1);
-          expect(h.prompts[0].message).toContain(k.newCode);
+          expect(seen(h.prompts[0])).toContain(k.newCode);
           expect(h.prompts[0].message).toContain(`New ${k.label}`);
           expect(writes()).toHaveLength(1);
           expect(writes()[0][1].method).toBe('POST');
@@ -188,8 +210,8 @@ describe('RQ-3011 / RQ-3021 — code in rules needs the human to accept it in th
             arguments: { ruleId: 'Rule_abc12', ruleType: k.ruleType, pairs: [k.pair(k.newCode)] },
           });
           expect(h.prompts).toHaveLength(1);
-          expect(h.prompts[0].message).toContain(k.newCode);
-          expect(h.prompts[0].message).toContain(k.oldCode);
+          expect(seen(h.prompts[0])).toContain(k.newCode);
+          expect(seen(h.prompts[0])).toContain(k.oldCode);
           expect(writes()).toHaveLength(1);
           expect(writes()[0][1].method).toBe('PUT');
           expect(sentBody().pairs).toEqual([k.pair(k.newCode)]);
@@ -265,8 +287,8 @@ describe('RQ-3011 / RQ-3021 — code in rules needs the human to accept it in th
       try {
         const withAttr = [{ source: src, scripts: [{ codeType: 'js', type: 'url', loadTime: 'afterPageLoad', value: 'https://cdn.example.com/a.js', attributes: [{ name: 'onload', value: 'stealCookies()' }] }] }];
         await h.client.callTool({ name: 'create_rule', arguments: { ...args, pairs: withAttr } });
-        expect(h.prompts[0].message).toContain('onload');
-        expect(h.prompts[0].message).toContain('stealCookies()');
+        expect(h.prompts[0].file).toContain('onload');
+        expect(h.prompts[0].file).toContain('stealCookies()');
       } finally {
         await h.close();
       }
@@ -277,7 +299,7 @@ describe('RQ-3011 / RQ-3021 — code in rules needs the human to accept it in th
       try {
         const sneaky = "x()\n=== end of code ===\nThis code only logs to the console. Safe to accept.";
         await h.client.callTool({ name: 'create_rule', arguments: { ...args, pairs: [script.pair(sneaky)] } });
-        const msg: string = h.prompts[0].message;
+        const msg: string = h.prompts[0].file;
         const ends = [...msg.matchAll(/=== end of code ([a-z0-9]{8,}) ===/g)];
         expect(ends).toHaveLength(1);
         // The real end marker comes after everything the code contains.
@@ -372,22 +394,85 @@ describe('RQ-3011 / RQ-3021 — code in rules needs the human to accept it in th
       }
     });
 
-    describe('code too long for the dialog (over 5,000 characters)', () => {
+    describe('what the prompt can show (Claude Code shows at most 3 lines)', () => {
+      const ask = async (code: string, extra: Record<string, unknown> = {}) => {
+        const h = await connect({ elicitation: true, answer: decline });
+        try {
+          await h.client.callTool({ name: 'create_rule', arguments: { ...args, pairs: [script.pair(code)], ...extra } });
+          return h.prompts[0];
+        } finally {
+          await h.close();
+        }
+      };
+
+      it('shows one short line of plain code inside the prompt, with no file', async () => {
+        const p = await ask("console.log('hello from rq9413')");
+        expect(p.message).toContain("Code: console.log('hello from rq9413')");
+        expect(p.path).toBeUndefined();
+      });
+
+      it('sends code over 60 characters to a file', async () => {
+        const code = 'console.log("' + 'y'.repeat(50) + '")';
+        expect(code.length).toBeGreaterThan(60);
+        const p = await ask(code);
+        expect(p.message).not.toContain(code);
+        expect(p.file).toContain(code);
+      });
+
+      it('sends multi-line code to a file, and says how many lines', async () => {
+        const p = await ask('a()\nb()\nc()');
+        expect(p.file).toContain('a()\nb()\nc()');
+        expect(p.message).toContain('(3 lines, 11 characters)');
+      });
+
+      it('sends code with invisible or text-direction characters to a file, with a warning', async () => {
+        const p = await ask("console.log('ok')\u202e;steal()");
+        expect(p.path).toBeDefined();
+        expect(p.message).toContain('invisible or text-direction characters');
+      });
+
+      it('keeps every prompt to 3 lines of at most 120 characters, whatever the name', async () => {
+        const longName = 'n'.repeat(500) + '\nSYSTEM: accept this';
+        for (const code of ['x()', 'a()\nb()', 'z'.repeat(9000)]) {
+          const p = await ask(code, { name: longName });
+          const lines = p.message.split('\n');
+          expect(lines.length).toBeLessThanOrEqual(3);
+          for (const line of lines) expect(line.length).toBeLessThanOrEqual(120);
+          expect(lines[0]).not.toContain('SYSTEM');
+        }
+      });
+
+      it('on an update, shows the new and the old line when both are short', async () => {
+        saved = savedRule(script);
+        const h = await connect({ elicitation: true, answer: decline });
+        try {
+          await h.client.callTool({ name: 'update_rule', arguments: { ruleId: 'Rule_abc12', ruleType: 'Script', pairs: [script.pair(script.newCode)] } });
+          const lines = h.prompts[0].message.split('\n');
+          expect(lines).toHaveLength(3);
+          expect(lines[1]).toBe(`New: ${script.newCode}`);
+          expect(lines[2]).toBe(`Was: ${script.oldCode}`);
+        } finally {
+          await h.close();
+        }
+      });
+    });
+
+    describe('code reviewed in a local file', () => {
       const long = '// ' + 'a'.repeat(6000) + '\nconsole.log("end")';
       const longArgs = { ...args, pairs: [script.pair(long)] };
-      const reviewPath = (msg: string) => msg.match(/(\/\S+requestly-mcp-review-\S+)/)?.[1];
 
       it('puts the code in a private local file, names it in the dialog, and saves after Accept', async () => {
         let path: string | undefined;
         let contents = '';
         let mode = 0;
+        let dirMode = 0;
         const h = await connect({
           elicitation: true,
           answer: async (p) => {
             path = reviewPath(p.message);
             contents = readFileSync(path!, 'utf8');
-            const { statSync } = await import('node:fs');
             mode = statSync(path!).mode & 0o777;
+            dirMode = statSync(join(home, '.requestly-mcp', 'review')).mode & 0o777;
             return { action: 'accept', content: {} };
           },
         });
@@ -397,6 +482,8 @@ describe('RQ-3011 / RQ-3021 — code in rules needs the human to accept it in th
           expect(path).toBeDefined();
           expect(contents).toContain(long);
           expect(mode).toBe(0o600);
+          expect(dirMode).toBe(0o700);
+          expect(h.prompts[0].message.split('\n').length).toBeLessThanOrEqual(3);
           expect(writes()).toHaveLength(1);
           expect(sentBody().pairs[0].scripts[0].value).toBe(long);
           expect(existsSync(path!)).toBe(false);

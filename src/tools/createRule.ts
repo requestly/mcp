@@ -12,7 +12,7 @@ export function registerCreateRuleTool(server: McpServer) {
       'This endpoint allows you to create various types of rules in Requestly, such as Redirect, Cancel, Replace, Headers, User-Agent, Script (Insert Script), Query Param, Modify Request, Modify Response, and Delay. Each rule has a specific structure and parameters based on the ruleType. ' +
       'New rules default to Inactive. A Script, Request or Response rule carries code that runs in the browser ' +
       '(inline scripts, script URLs, request/response bodies): before such a rule is saved, the user is shown ' +
-      'the code in the MCP host and must accept it (an approval prompt the model cannot answer). If the user ' +
+      'the code (in the MCP host prompt, or in a local file it names) and must accept it (an approval prompt the model cannot answer). If the user ' +
       'does not accept, or the host cannot show the prompt, nothing is saved.',
     inputSchema: schema,
     annotations: {

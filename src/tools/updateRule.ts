@@ -12,7 +12,7 @@ export function registerUpdateRuleTool(server: McpServer) {
         "Update an existing rule in Requestly. Requires ruleId and ruleType; any field left out " +
         "(name, description, status, pairs) keeps its saved value. If the update adds or changes code " +
         "in a Script, Request or Response rule (inline scripts, script URLs, request/response bodies), " +
-        "the user is shown the old and new code in the MCP host and must accept it (an approval prompt " +
+        "the user is shown the old and new code (in the MCP host prompt, or in a local file it names) and must accept it (an approval prompt " +
         "the model cannot answer); otherwise nothing is changed. Turning a rule on or off, renaming it, " +
         "or changing its URL match does not ask.",
       inputSchema: schema,

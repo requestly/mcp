@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { askHumanToApprove, type ApprovalOutcome } from "./humanApproval.js";
@@ -20,12 +20,22 @@ import { askHumanToApprove, type ApprovalOutcome } from "./humanApproval.js";
  *   load) plus its tag attributes (an `onload` attribute is code too);
  * - Request and Response rules: the body, code or static (a static HTML
  *   response can carry a <script> as well).
+ *
+ * Where the human reads the code: hosts show only part of a prompt (Claude Code
+ * 2.1.330 shows at most 3 lines, each cut at the terminal width, with no way to
+ * expand). So the prompt itself is kept to 3 short lines. Code that is one short
+ * line of plain ASCII is shown in the prompt; anything else is written to a
+ * private file under ~/.requestly-mcp/review/ that the prompt names. That file
+ * is re-read on Accept (nothing is saved if it changed) and deleted afterwards.
  */
 
 export const CODE_RULE_TYPES = new Set(["Script", "Request", "Response"]);
 
-/** Longest code shown inside the dialog itself; longer code is reviewed in a local file. */
-export const DIALOG_CODE_LIMIT = 5000;
+/** Longest single line of code shown inside the prompt itself. */
+export const INLINE_CODE_LIMIT = 60;
+
+/** Most lines a prompt may have (Claude Code shows 3). */
+export const PROMPT_MAX_LINES = 3;
 
 type Pair = Record<string, any>;
 
@@ -38,6 +48,8 @@ export type CodeItem = {
   where: string;
   /** The code itself, exactly as it will be saved. */
   code: string;
+  /** True when the item carries more than its value (e.g. script tag attributes). */
+  hasExtras: boolean;
 };
 
 function describeSource(source: any): string {
@@ -63,6 +75,7 @@ export function codeItems(ruleType: string, pairs: unknown): CodeItem[] {
           label: `${s?.codeType ?? "?"} ${s?.type === "url" ? "script loaded from a URL" : "inline code"}, ${s?.loadTime ?? "?"}`,
           where,
           code: value + attrText,
+          hasExtras: attributes.length > 0,
         });
       }
     } else {
@@ -74,6 +87,7 @@ export function codeItems(ruleType: string, pairs: unknown): CodeItem[] {
           label: `${ruleType.toLowerCase()} body (${part.type ?? "?"})`,
           where,
           code: value,
+          hasExtras: false,
         });
       }
     }
@@ -94,16 +108,25 @@ export function newCode(prev: CodeItem[], next: CodeItem[]): CodeItem[] {
   return added;
 }
 
+/** Printable ASCII only: nothing that can hide, reorder or break a line in a terminal. */
+const PLAIN_ASCII = /^[\x20-\x7e]*$/;
+/** Characters that can make code look different from what it is (Trojan Source and friends). */
+const DECEPTIVE = /[\u0000-\u0008\u000b-\u001f\u007f\u0085\u00ad\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/;
+
+/** One short line of plain ASCII, without extras: safe to show in full inside the prompt. */
+function fitsInline(item: CodeItem): boolean {
+  return !item.hasExtras && item.code.length <= INLINE_CODE_LIMIT && PLAIN_ASCII.test(item.code);
+}
+
 /**
- * Render code between start/end markers carrying a random nonce, so code that
- * contains its own "end of code" line cannot make the dialog look like the code
- * stopped early and the rest is our text.
+ * The review file: code between start/end markers carrying a random nonce, so
+ * code that contains its own "end of code" line cannot make the file look like
+ * the code stopped early and the rest is our text.
  */
-function renderCode(title: string, items: CodeItem[], nonce: string): string {
+function renderSection(title: string, items: CodeItem[], nonce: string): string {
   const total = items.reduce((n, i) => n + i.code.length, 0);
   const parts = items.map(
-    (i, idx) =>
-      `--- ${idx + 1} of ${items.length}: ${i.label}; runs on ${i.where} ---\n${i.code}`
+    (i, idx) => `--- ${idx + 1} of ${items.length}: ${i.label}; runs on ${i.where} ---\n${i.code}`
   );
   return (
     `${title} (${items.length} item${items.length === 1 ? "" : "s"}, ${total} characters)\n` +
@@ -127,10 +150,27 @@ export type CodeReviewRequest = {
 
 export type CodeReviewOutcome = ApprovalOutcome | { approved: false; reason: "file-changed" };
 
+/** ~/.requestly-mcp/review, private to the user; refuses to follow a symlink. */
+function reviewDir(): string {
+  const base = join(homedir(), ".requestly-mcp");
+  const dir = join(base, "review");
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  for (const d of [base, dir]) {
+    if (lstatSync(d).isSymbolicLink()) throw new Error(`${d} is a symlink; refusing to write code for review there`);
+  }
+  chmodSync(dir, 0o700);
+  return dir;
+}
+
+function displayPath(path: string): string {
+  const home = homedir();
+  return path.startsWith(home + "/") ? "~" + path.slice(home.length) : path;
+}
+
 /**
- * Ask the human to accept new code. Short code is shown in the dialog; longer
- * code is written to a private local file named in the dialog, and re-read on
- * Accept: if it changed while the dialog was open, nothing is saved.
+ * Ask the human to accept new code, in a prompt of at most 3 short lines.
+ * Short plain code is shown in the prompt; anything else is reviewed in a
+ * private local file that the prompt names and that is re-read on Accept.
  */
 export async function askHumanToAcceptCode(
   server: McpServer,
@@ -138,38 +178,53 @@ export async function askHumanToAcceptCode(
   options: { relatedRequestId?: string | number; signal?: AbortSignal } = {}
 ): Promise<CodeReviewOutcome> {
   const nonce = randomBytes(6).toString("hex");
-  const name = JSON.stringify(req.name ?? "").slice(0, 200);
-  const verb = req.action === "create" ? "create" : "change the code of";
-  const header =
-    `The AI wants to ${verb} the Requestly ${req.ruleType} rule ${name}. ` +
-    `This code runs in your browser. It is saved only if you accept; status after saving: ${req.status}.`;
-  const added = renderCode(
+  // Model-supplied name: JSON-quoted (no line breaks) and kept short so line 1 stays readable.
+  const shortName = req.name.length > 40 ? req.name.slice(0, 39) + "…" : req.name;
+  const name = JSON.stringify(shortName);
+  const replaced = req.action === "update" ? req.replaced ?? [] : [];
+  const what =
+    req.action === "create"
+      ? `Create ${req.ruleType} rule ${name} (saved ${req.status})`
+      : `Change the code of ${req.ruleType} rule ${name} (${req.status})`;
+
+  const inline =
+    req.added.length === 1 && replaced.length <= 1 && [...req.added, ...replaced].every(fitsInline);
+  if (inline) {
+    const lines =
+      req.action === "create"
+        ? [`${what}. Its code:`, `Code: ${req.added[0].code}`]
+        : [`${what}:`, `New: ${req.added[0].code}`, ...(replaced.length ? [`Was: ${replaced[0].code}`] : [])];
+    return askHumanToApprove(server, lines.join("\n"), options);
+  }
+
+  // Review in a private local file.
+  const sections = renderSection(
     req.action === "create" ? "Code to be saved" : "New code to be saved",
     req.added,
     nonce
   );
-  const replaced =
-    req.action === "update" && req.replaced && req.replaced.length
-      ? "\n\n" + renderCode("Saved code it replaces", req.replaced, nonce)
-      : "";
-  const review = `${added}${replaced}`;
-  const footer = "\n\nAccept only if you have read this code and want it saved.";
+  const oldSection = replaced.length ? "\n\n" + renderSection("Saved code it replaces", replaced, nonce) : "";
+  const review =
+    `Requestly MCP: code waiting for your approval\n` +
+    `${req.action === "create" ? "Create" : "Change the code of"} ${req.ruleType} rule ${JSON.stringify(req.name)}\n` +
+    `Status after saving: ${req.status}\n\n` +
+    `${sections}${oldSection}\n`;
+  const all = [...req.added, ...replaced].map((i) => i.code).join("\n");
+  const lineCount = req.added.reduce((n, i) => n + i.code.split("\n").length, 0);
+  const charCount = req.added.reduce((n, i) => n + i.code.length, 0);
 
-  if (review.length <= DIALOG_CODE_LIMIT) {
-    return askHumanToApprove(server, `${header}\n\n${review}${footer}`, options);
-  }
-
-  // Too long to show in the dialog: review it in a private local file instead.
-  let dir: string | undefined;
+  let file: string | undefined;
   try {
-    dir = mkdtempSync(join(tmpdir(), "requestly-mcp-review-"));
-    const file = join(dir, `code-${nonce}.txt`);
+    file = join(reviewDir(), `${nonce}.txt`);
     writeFileSync(file, review, { mode: 0o600, flag: "wx" });
+    const warning = DECEPTIVE.test(all) ? "Warning: it has invisible or text-direction characters. " : "";
     const outcome = await askHumanToApprove(
       server,
-      `${header}\n\nThe code is too long to show here (${review.length} characters). ` +
-        `Open this file and read it before you accept:\n${file}\n` +
-        `If the file is changed while this prompt is open, nothing is saved.${footer}`,
+      [
+        `${what}. Read its code before you accept:`,
+        `${displayPath(file)} (${lineCount} line${lineCount === 1 ? "" : "s"}, ${charCount} characters)`,
+        `${warning}If the file changes before you accept, nothing is saved.`,
+      ].join("\n"),
       options
     );
     if (!outcome.approved) return outcome;
@@ -184,7 +239,7 @@ export async function askHumanToAcceptCode(
     console.error("Code review file could not be prepared:", error);
     return { approved: false, reason: "failed" };
   } finally {
-    if (dir) rmSync(dir, { recursive: true, force: true });
+    if (file) rmSync(file, { force: true });
   }
 }
 
