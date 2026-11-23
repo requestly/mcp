@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { REQUESTLY_API_BASE, apiErrorResult } from "../apiClient.js";
+import { REQUESTLY_API_BASE, apiErrorResult, readApiJson } from "../apiClient.js";
+import { untrustedDataResult } from "../untrustedData.js";
 
 export function registerCreateGroupTool(server: McpServer) {
   server.registerTool(
@@ -40,15 +41,9 @@ export function registerCreateGroupTool(server: McpServer) {
           // RQ-3025: status only — never reflect the upstream body.
           return await apiErrorResult("create group", response);
         }
-        const data = await response.json();
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify(data, null, 2),
-            },
-          ],
-        };
+        const parsed = await readApiJson("create group", response);
+        if (!parsed.ok) return parsed.result;
+        return untrustedDataResult("create_group", parsed.data);
       } catch (error) {
         return {
           content: [

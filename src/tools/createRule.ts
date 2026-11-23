@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ruleSchema, schema, ValidatedRuleArgs } from "../types/createRuleSchemas.js";
-import { REQUESTLY_API_BASE, apiErrorResult } from "../apiClient.js";
+import { REQUESTLY_API_BASE, apiErrorResult, readApiJson } from "../apiClient.js";
+import { untrustedDataResult } from "../untrustedData.js";
 import { EDITED_NOTE, applyAccepted, askHumanToAcceptCode, codeItems, codeNotApprovedText } from "../codeApproval.js";
 
 export function registerCreateRuleTool(server: McpServer) {
@@ -85,14 +86,13 @@ export function registerCreateRuleTool(server: McpServer) {
       // RQ-3025: status only — never reflect the upstream body into LLM context.
       return await apiErrorResult('create rule', response);
     }
-    const data = await response.json();
+    const parsed = await readApiJson('create rule', response);
+    if (!parsed.ok) return parsed.result;
     const note =
       effectiveStatus === 'Inactive'
         ? '\n\nNOTE: This rule was created INACTIVE. It takes effect once it is turned on.'
         : '';
-    return {
-      content: [{ type: 'text', text: JSON.stringify(data, null, 2) + note + (edited ? EDITED_NOTE : '') }],
-    };
+    return untrustedDataResult('create_rule', parsed.data, note + (edited ? EDITED_NOTE : ''));
   }
   catch (error) {
     console.error('Error in create_rule tool:', error);

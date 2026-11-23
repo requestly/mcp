@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { buildResourceUrl, apiErrorResult, resourceIdSchema } from "../apiClient.js";
+import { buildResourceUrl, apiErrorResult, resourceIdSchema, readApiJson } from "../apiClient.js";
+import { untrustedDataResult } from "../untrustedData.js";
 import { askHumanToApprove, notApprovedText } from "../humanApproval.js";
 
 export function registerDeleteRuleTool(server: McpServer) {
@@ -63,15 +64,9 @@ export function registerDeleteRuleTool(server: McpServer) {
           // explicit error branches did.
           return await apiErrorResult("delete rule", response);
         }
-        const data = await response.json();
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify(data, null, 2),
-            },
-          ],
-        };
+        const parsed = await readApiJson("delete rule", response);
+        if (!parsed.ok) return parsed.result;
+        return untrustedDataResult("delete_rule", parsed.data);
       } catch (error) {
         return {
           content: [

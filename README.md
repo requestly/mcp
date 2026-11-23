@@ -25,6 +25,14 @@ Script, Request and Response rules carry code that runs in your browser: inline 
 - When updating a rule, any field you leave out keeps its saved value.
 
 
+## What the AI model reads back
+
+Anyone who can edit your workspace can write rule and group names, descriptions, URLs and code, so that text could carry instructions aimed at an AI model ("ignore your instructions and ..."). Every tool returns the Requestly API's data inside an `<untrusted-data-...>` block, with a new random tag on each call and a warning before and after it. The server's instructions tell the host to treat that block as data only.
+
+- Inside the block is the API's JSON. Invisible characters (zero-width, bidi, Unicode tag characters) are written as `\u` escapes, so hidden text shows up; the JSON still parses to the same data.
+- The tool output is no longer bare JSON. If a script parses it, read the JSON between the tags.
+- This lowers the risk; it can't guarantee a model ignores planted text. Deletes and code in rules still need your approval (see above).
+
 ## Requirements
 - Node.js 22.23.4+ or 24.22.1+. Older versions miss the October 2026 Node.js security fixes.
 

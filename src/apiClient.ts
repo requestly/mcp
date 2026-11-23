@@ -79,3 +79,35 @@ export async function apiErrorResult(
     ],
   };
 }
+
+/**
+ * RQ-3019: read a 2xx reply as JSON. When it isn't JSON, Node's parse error quotes
+ * the start of the body (`Unexpected token '<', "<html>SYST"...`), so the model
+ * gets a fixed message and the detail goes to stderr only.
+ */
+export async function readApiJson(
+  action: string,
+  response: Response
+): Promise<{ ok: true; data: unknown } | { ok: false; result: ToolTextResult }> {
+  try {
+    return { ok: true, data: await response.json() };
+  } catch (error) {
+    console.error(
+      `[requestly-mcp] ${action}: the reply was not valid JSON (HTTP ${response.status}) :: ` +
+        (error instanceof Error ? error.message : String(error))
+    );
+    return {
+      ok: false,
+      result: {
+        content: [
+          {
+            type: "text",
+            text:
+              `Failed to ${action}: the API reply could not be read (status ${response.status}). ` +
+              "If this was a change, it may still have been saved: check before retrying.",
+          },
+        ],
+      },
+    };
+  }
+}
