@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ruleSchema, schema, ValidatedRuleArgs } from "../types/createRuleSchemas.js";
 import { REQUESTLY_API_BASE, apiErrorResult } from "../apiClient.js";
-import { askHumanToAcceptCode, codeItems, codeNotApprovedText } from "../codeApproval.js";
+import { EDITED_NOTE, applyAccepted, askHumanToAcceptCode, codeItems, codeNotApprovedText } from "../codeApproval.js";
 
 export function registerCreateRuleTool(server: McpServer) {
   server.registerTool(
@@ -12,7 +12,7 @@ export function registerCreateRuleTool(server: McpServer) {
       'This endpoint allows you to create various types of rules in Requestly, such as Redirect, Cancel, Replace, Headers, User-Agent, Script (Insert Script), Query Param, Modify Request, Modify Response, and Delay. Each rule has a specific structure and parameters based on the ruleType. ' +
       'New rules default to Inactive. A Script, Request or Response rule carries code that runs in the browser ' +
       '(inline scripts, script URLs, request/response bodies): before such a rule is saved, the user is shown ' +
-      'the code (in the MCP host prompt, or in a local file it names) and must accept it (an approval prompt the model cannot answer). If the user ' +
+      'the code (in the MCP host prompt, or in a local file it names, which the user may edit before accepting) and must accept it (an approval prompt the model cannot answer). If the user ' +
       'does not accept, or the host cannot show the prompt, nothing is saved.',
     inputSchema: schema,
     annotations: {
@@ -45,6 +45,8 @@ export function registerCreateRuleTool(server: McpServer) {
       // seen it and accepted it in the host. A model-supplied argument (the old
       // confirmActivation) can never stand in for that.
       const code = codeItems(ruleType, pairs);
+      let pairsToSave: unknown = pairs;
+      let edited = false;
       if (code.length > 0) {
         const approval = await askHumanToAcceptCode(
           server,
@@ -54,6 +56,9 @@ export function registerCreateRuleTool(server: McpServer) {
         if (!approval.approved) {
           return { content: [{ type: 'text', text: codeNotApprovedText(`the new ${ruleType} rule`, approval.reason) }] };
         }
+        // What the user accepted, including any edits they made in the review file.
+        pairsToSave = applyAccepted(ruleType, pairs, code, approval.accepted);
+        edited = approval.edited;
       }
 
       const body: Record<string, unknown> = {
@@ -61,7 +66,7 @@ export function registerCreateRuleTool(server: McpServer) {
         objectType: 'rule',
         status: effectiveStatus,
         ruleType,
-        pairs,
+        pairs: pairsToSave,
         description: description || undefined,
       };
       if (groupId) {
@@ -86,7 +91,7 @@ export function registerCreateRuleTool(server: McpServer) {
         ? '\n\nNOTE: This rule was created INACTIVE. It takes effect once it is turned on.'
         : '';
     return {
-      content: [{ type: 'text', text: JSON.stringify(data, null, 2) + note }],
+      content: [{ type: 'text', text: JSON.stringify(data, null, 2) + note + (edited ? EDITED_NOTE : '') }],
     };
   }
   catch (error) {

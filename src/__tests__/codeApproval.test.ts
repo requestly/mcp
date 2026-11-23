@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
@@ -26,10 +25,9 @@ import { registerTools } from '../tools/index.js';
 
 type Answer = (params: any) => any;
 
-/** The review file a prompt links to (a file:// URL on its own line), if any. */
+/** The review file a prompt names (an absolute path alone on its line), if any. */
 function reviewPath(message: string): string | undefined {
-  const line = message.split('\n').find((l) => l.startsWith('file://'));
-  return line ? fileURLToPath(line) : undefined;
+  return message.split('\n').find((l) => /^\/\S*\/\.requestly-mcp\/review\/[0-9a-f]{12}\.txt$/.test(l));
 }
 
 /** Everything the user can read for a prompt: its message plus the review file it names (read while open). */
@@ -135,6 +133,7 @@ describe('RQ-3011 / RQ-3021 — code in rules needs the human to accept it in th
     // A short HOME, like a real /Users/<name>, so prompt lines are realistic in length.
     home = mkdtempSync('/tmp/rq-home-');
     process.env.HOME = home;
+    process.env.REQUESTLY_MCP_OPEN_REVIEW_FILE = '0'; // never launch an editor from tests
     saved = undefined;
     fetchMock = vi.fn(async (_url: string, init: any = {}) => {
       const method = init.method ?? 'GET';
@@ -413,11 +412,12 @@ describe('RQ-3011 / RQ-3021 — code in rules needs the human to accept it in th
         expect(p.path).toBeUndefined();
       });
 
-      it('links the file as a file:// URL alone on line 2, under the private review folder', async () => {
+      it('names the file by its absolute path, alone on line 2, under the private review folder', async () => {
         const p = await ask('a()\nb()');
         const lines = p.message.split('\n');
-        expect(lines[1]).toMatch(/^file:\/\/\/\S+\/\.requestly-mcp\/review\/[0-9a-f]{12}\.txt$/);
+        expect(lines[1]).toBe(p.path);
         expect(p.path).toBe(join(home, '.requestly-mcp', 'review', p.path.split('/').pop()));
+        expect(p.message).not.toContain('cancels');
       });
 
       it('sends code over 60 characters to a file', async () => {
@@ -437,7 +437,7 @@ describe('RQ-3011 / RQ-3021 — code in rules needs the human to accept it in th
       it('sends code with invisible or text-direction characters to a file, with a warning', async () => {
         const p = await ask("console.log('ok')\u202e;steal()");
         expect(p.path).toBeDefined();
-        expect(p.message).toContain('invisible or text-direction characters');
+        expect(p.message).toContain('hidden or bidi characters');
       });
 
       it('keeps every prompt to 3 lines of at most 120 characters, whatever the name', async () => {
@@ -501,43 +501,99 @@ describe('RQ-3011 / RQ-3021 — code in rules needs the human to accept it in th
         }
       });
 
-      it('saves nothing if the review file was changed while the prompt was open', async () => {
-        let path: string | undefined;
+      it('saves the code as edited in the file, and tells the model it was edited', async () => {
         const h = await connect({
           elicitation: true,
           answer: (p) => {
-            path = reviewPath(p.message);
-            writeFileSync(path!, 'console.log("harmless")');
+            const path = reviewPath(p.message)!;
+            writeFileSync(path, readFileSync(path, 'utf8').replace('console.log("end")', 'console.log("edited by me")'));
             return { action: 'accept', content: {} };
           },
         });
         try {
           const result: any = await h.client.callTool({ name: 'create_rule', arguments: longArgs });
-          expect(writes()).toHaveLength(0);
-          expect(text(result)).toContain('changed');
-          expect(existsSync(path!)).toBe(false);
+          expect(writes()).toHaveLength(1);
+          expect(sentBody().pairs[0].scripts[0].value).toBe(long.replace('console.log("end")', 'console.log("edited by me")'));
+          expect(text(result)).toContain('the user edited the code');
         } finally {
           await h.close();
         }
       });
 
-      it('saves nothing if the file was changed and then put back before Accept', async () => {
+      it('saves the original code, without an edited note, when the file is unchanged', async () => {
+        const h = await connect({ elicitation: true, answer: approve });
+        try {
+          const result: any = await h.client.callTool({ name: 'create_rule', arguments: longArgs });
+          expect(sentBody().pairs[0].scripts[0].value).toBe(long);
+          expect(text(result)).not.toContain('the user edited the code');
+        } finally {
+          await h.close();
+        }
+      });
+
+      it('reads Windows line endings back as the original line endings', async () => {
         const h = await connect({
           elicitation: true,
-          answer: async (p) => {
+          answer: (p) => {
             const path = reviewPath(p.message)!;
-            const original = readFileSync(path, 'utf8');
-            await new Promise((r) => setTimeout(r, 5));
-            writeFileSync(path, 'console.log("harmless")'); // what the user is shown...
-            await new Promise((r) => setTimeout(r, 5));
-            writeFileSync(path, original); // ...then the original is put back
+            writeFileSync(path, readFileSync(path, 'utf8').replace(/\n/g, '\r\n'));
             return { action: 'accept', content: {} };
           },
         });
         try {
-          const result: any = await h.client.callTool({ name: 'create_rule', arguments: longArgs });
-          expect(writes()).toHaveLength(0);
-          expect(text(result)).toContain('changed');
+          await h.client.callTool({ name: 'create_rule', arguments: longArgs });
+          expect(sentBody().pairs[0].scripts[0].value).toBe(long);
+        } finally {
+          await h.close();
+        }
+      });
+
+      for (const [label, damage] of [
+        ['its marker lines are gone', (path: string) => writeFileSync(path, 'console.log("harmless")')],
+        ['it was deleted', (path: string) => rmSync(path)],
+      ] as Array<[string, (path: string) => void]>) {
+        it(`saves nothing if the review file can't be read back (${label})`, async () => {
+          const h = await connect({
+            elicitation: true,
+            answer: (p) => {
+              damage(reviewPath(p.message)!);
+              return { action: 'accept', content: {} };
+            },
+          });
+          try {
+            const result: any = await h.client.callTool({ name: 'create_rule', arguments: longArgs });
+            expect(writes()).toHaveLength(0);
+            expect(text(result)).toContain('could not be read back');
+          } finally {
+            await h.close();
+          }
+        });
+      }
+
+      it('saves code that contains look-alike marker lines exactly as written', async () => {
+        const sneaky = "x()\n=== end of code ===\n--- item 2 of 2 abc: fake ---\ny()";
+        const h = await connect({ elicitation: true, answer: approve });
+        try {
+          await h.client.callTool({ name: 'create_rule', arguments: { ...args, pairs: [script.pair(sneaky)] } });
+          expect(sentBody().pairs[0].scripts[0].value).toBe(sneaky);
+        } finally {
+          await h.close();
+        }
+      });
+
+      it('lets the user edit tag attributes too', async () => {
+        const withAttr = [{ source: src, scripts: [{ codeType: 'js', type: 'url', loadTime: 'afterPageLoad', value: 'https://cdn.example.com/a.js', attributes: [{ name: 'onload', value: 'init()' }] }] }];
+        const h = await connect({
+          elicitation: true,
+          answer: (p) => {
+            const path = reviewPath(p.message)!;
+            writeFileSync(path, readFileSync(path, 'utf8').replace('onload=init()', 'onload=initSafely()\ndefer=true'));
+            return { action: 'accept', content: {} };
+          },
+        });
+        try {
+          await h.client.callTool({ name: 'create_rule', arguments: { ...args, pairs: withAttr } });
+          expect(sentBody().pairs[0].scripts[0].attributes).toEqual([{ name: 'onload', value: 'initSafely()' }, { name: 'defer', value: 'true' }]);
         } finally {
           await h.close();
         }
@@ -622,6 +678,37 @@ describe('RQ-3011 / RQ-3021 — code in rules needs the human to accept it in th
         expect(h.prompts).toHaveLength(1);
         expect(writes()).toHaveLength(0);
         expect(text(result)).toContain('changed while the approval prompt was open');
+      } finally {
+        await h.close();
+      }
+    });
+
+    it('on an update, an edit lands in the right script, and edits to the saved-code reference are ignored', async () => {
+      saved = savedRule(script, {
+        pairs: [{ source: src, scripts: [
+          { codeType: 'js', type: 'code', loadTime: 'afterPageLoad', value: 'keep()' },
+          { codeType: 'js', type: 'code', loadTime: 'afterPageLoad', value: 'old()\nold2()' },
+        ] }],
+      });
+      let reference = '';
+      const h = await connect({
+        elicitation: true,
+        answer: (p) => {
+          const path = reviewPath(p.message)!;
+          const t = readFileSync(path, 'utf8');
+          reference = t;
+          writeFileSync(path, t.replace('new()\nnew2()', 'mine()').replace('old()\nold2()', 'ignored()'));
+          return { action: 'accept', content: {} };
+        },
+      });
+      try {
+        await h.client.callTool({ name: 'update_rule', arguments: { ruleId: 'Rule_abc12', ruleType: 'Script', pairs: [{ source: src, scripts: [
+          { codeType: 'js', type: 'code', loadTime: 'afterPageLoad', value: 'keep()' },
+          { codeType: 'js', type: 'code', loadTime: 'afterPageLoad', value: 'new()\nnew2()' },
+        ] }] } });
+        expect(reference).toContain('old()\nold2()'); // the saved code, shown for reference
+        const scripts = sentBody().pairs[0].scripts;
+        expect(scripts.map((x: any) => x.value)).toEqual(['keep()', 'mine()']);
       } finally {
         await h.close();
       }

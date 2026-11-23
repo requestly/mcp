@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ruleSchema, schema, ValidatedRuleArgs } from "../types/updateRuleSchemas.js";
 import { buildResourceUrl, apiErrorResult } from "../apiClient.js";
-import { askHumanToAcceptCode, codeItems, codeNotApprovedText, newCode } from "../codeApproval.js";
+import { EDITED_NOTE, applyAccepted, askHumanToAcceptCode, codeItems, codeNotApprovedText, newCode } from "../codeApproval.js";
 
 /** The parts of a saved rule that matter for an update; any difference means it changed. */
 function ruleVersion(rule: any): string {
@@ -19,7 +19,7 @@ export function registerUpdateRuleTool(server: McpServer) {
         "Update an existing rule in Requestly. Requires ruleId and ruleType; any field left out " +
         "(name, description, status, pairs) keeps its saved value. If the update adds or changes code " +
         "in a Script, Request or Response rule (inline scripts, script URLs, request/response bodies), " +
-        "the user is shown the old and new code (in the MCP host prompt, or in a local file it names) and must accept it (an approval prompt " +
+        "the user is shown the old and new code (in the MCP host prompt, or in a local file it names, which the user may edit before accepting) and must accept it (an approval prompt " +
         "the model cannot answer); otherwise nothing is changed. Turning a rule on or off, renaming it, " +
         "or changing its URL match does not ask.",
       inputSchema: schema,
@@ -110,6 +110,7 @@ export function registerUpdateRuleTool(server: McpServer) {
         const before = codeItems(saved.ruleType, saved.pairs);
         const after = codeItems(saved.ruleType, body.pairs);
         const added = newCode(before, after);
+        let edited = false;
         if (added.length > 0) {
           const kept = new Set(after.map((i) => i.key));
           const approval = await askHumanToAcceptCode(
@@ -127,6 +128,9 @@ export function registerUpdateRuleTool(server: McpServer) {
           if (!approval.approved) {
             return { content: [{ type: "text", text: codeNotApprovedText(`rule ${ruleId}`, approval.reason) }] };
           }
+          // What the user accepted, including any edits they made in the review file.
+          body.pairs = applyAccepted(saved.ruleType, body.pairs, added, approval.accepted);
+          edited = approval.edited;
           // The prompt can stay open for minutes. If the rule changed meanwhile, the
           // user approved against a version that is no longer the saved one, and the
           // merged body would overwrite the newer change: save nothing. (This narrows
@@ -164,7 +168,7 @@ export function registerUpdateRuleTool(server: McpServer) {
           content: [
             {
               type: "text",
-              text: JSON.stringify(data, null, 2),
+              text: JSON.stringify(data, null, 2) + (edited ? EDITED_NOTE : ""),
             },
           ],
         };

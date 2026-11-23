@@ -1,8 +1,8 @@
+import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { chmodSync, lstatSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { askHumanToApprove, type ApprovalOutcome } from "./humanApproval.js";
 
@@ -25,9 +25,11 @@ import { askHumanToApprove, type ApprovalOutcome } from "./humanApproval.js";
  * Where the human reads the code: hosts show only part of a prompt (Claude Code
  * 2.1.330 shows at most 3 lines, each cut at the terminal width, with no way to
  * expand). So the prompt itself is kept to 3 short lines. Code that is one short
- * line of plain ASCII is shown in the prompt; anything else is written to a
- * private file under ~/.requestly-mcp/review/ that the prompt links to (file://). That file
- * is re-read on Accept (nothing is saved if it changed) and deleted afterwards.
+ * line of plain ASCII is shown in the prompt. Anything else is written to a
+ * private file under ~/.requestly-mcp/review/, named in the prompt and opened in
+ * the user's default text editor. The user may edit it: what the file holds
+ * when they click Accept is what gets saved (decided 23 Nov). It is deleted
+ * afterwards.
  */
 
 export const CODE_RULE_TYPES = new Set(["Script", "Request", "Response"]);
@@ -35,10 +37,8 @@ export const CODE_RULE_TYPES = new Set(["Script", "Request", "Response"]);
 /** Longest single line of code shown inside the prompt itself. */
 export const INLINE_CODE_LIMIT = 60;
 
-/** Most lines a prompt may have (Claude Code shows 3). */
-export const PROMPT_MAX_LINES = 3;
-
 type Pair = Record<string, any>;
+type Attribute = { name: string; value: string };
 
 export type CodeItem = {
   /** Identity used to tell new code from saved code. */
@@ -47,38 +47,51 @@ export type CodeItem = {
   label: string;
   /** Where it runs, from the pair's source. */
   where: string;
-  /** The code itself, exactly as it will be saved. */
-  code: string;
-  /** True when the item carries more than its value (e.g. script tag attributes). */
-  hasExtras: boolean;
+  /** The value exactly as it will be saved (script code or URL, or body). */
+  value: string;
+  /** Script tag attributes, when the script has any. */
+  attributes?: Attribute[];
+  /** Where the value lives in the rule's pairs. */
+  ref: { pair: number; script?: number };
 };
+
+/** What the user accepted for each reviewed item (possibly edited in the review file). */
+export type AcceptedCode = { value: string; attributes?: Attribute[] };
 
 function describeSource(source: any): string {
   if (!source || typeof source !== "object") return "(no URL match)";
   return `${source.key ?? "?"} ${source.operator ?? "?"} ${JSON.stringify(String(source.value ?? "")).slice(0, 200)}`;
 }
 
+/** Everything a person reads for an item: its value, then its tag attributes. */
+function shownText(item: CodeItem): string {
+  const attrs = item.attributes?.length
+    ? "\n" + item.attributes.map((a) => `[tag attribute] ${a.name}=${a.value}`).join("\n")
+    : "";
+  return item.value + attrs;
+}
+
 /** Every piece of code a rule's pairs carry. Empty for rule types without code. */
 export function codeItems(ruleType: string, pairs: unknown): CodeItem[] {
   if (!CODE_RULE_TYPES.has(ruleType) || !Array.isArray(pairs)) return [];
   const items: CodeItem[] = [];
-  for (const pair of pairs as Pair[]) {
+  (pairs as Pair[]).forEach((pair, p) => {
     const where = describeSource(pair?.source);
     if (ruleType === "Script") {
-      for (const s of Array.isArray(pair?.scripts) ? pair.scripts : []) {
-        const attributes = Array.isArray(s?.attributes) ? s.attributes : [];
+      (Array.isArray(pair?.scripts) ? pair.scripts : []).forEach((s: any, j: number) => {
+        const attributes: Attribute[] = Array.isArray(s?.attributes)
+          ? s.attributes.map((a: any) => ({ name: String(a?.name ?? ""), value: String(a?.value ?? "") }))
+          : [];
         const value = String(s?.value ?? "");
-        const attrText = attributes.length
-          ? "\n" + attributes.map((a: any) => `[tag attribute] ${String(a?.name ?? "")}=${String(a?.value ?? "")}`).join("\n")
-          : "";
         items.push({
           key: JSON.stringify(["script", s?.codeType ?? null, s?.type ?? null, value, attributes]),
           label: `${s?.codeType ?? "?"} ${s?.type === "url" ? "script loaded from a URL" : "inline code"}, ${s?.loadTime ?? "?"}`,
           where,
-          code: value + attrText,
-          hasExtras: attributes.length > 0,
+          value,
+          attributes: attributes.length ? attributes : undefined,
+          ref: { pair: p, script: j },
         });
-      }
+      });
     } else {
       const part = ruleType === "Request" ? pair?.request : pair?.response;
       if (part && typeof part === "object") {
@@ -87,12 +100,12 @@ export function codeItems(ruleType: string, pairs: unknown): CodeItem[] {
           key: JSON.stringify([ruleType, part.type ?? null, value]),
           label: `${ruleType.toLowerCase()} body (${part.type ?? "?"})`,
           where,
-          code: value,
-          hasExtras: false,
+          value,
+          ref: { pair: p },
         });
       }
     }
-  }
+  });
   return items;
 }
 
@@ -109,30 +122,105 @@ export function newCode(prev: CodeItem[], next: CodeItem[]): CodeItem[] {
   return added;
 }
 
+/**
+ * Put accepted (possibly edited) values back into a copy of the pairs, at the
+ * places the reviewed items came from.
+ */
+export function applyAccepted(ruleType: string, pairs: unknown, items: CodeItem[], accepted: AcceptedCode[]): unknown {
+  const copy: Pair[] = JSON.parse(JSON.stringify(pairs));
+  items.forEach((item, i) => {
+    const a = accepted[i];
+    const pair = copy[item.ref.pair];
+    if (ruleType === "Script" && item.ref.script !== undefined) {
+      const script = pair.scripts[item.ref.script];
+      script.value = a.value;
+      if (item.attributes) script.attributes = a.attributes ?? [];
+    } else {
+      (ruleType === "Request" ? pair.request : pair.response).value = a.value;
+    }
+  });
+  return copy;
+}
+
 /** Printable ASCII only: nothing that can hide, reorder or break a line in a terminal. */
 const PLAIN_ASCII = /^[\x20-\x7e]*$/;
 /** Characters that can make code look different from what it is (Trojan Source and friends). */
 const DECEPTIVE = /[\u0000-\u0008\u000b-\u001f\u007f\u0085\u00ad\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/;
 
-/** One short line of plain ASCII, without extras: safe to show in full inside the prompt. */
+/** One short line of plain ASCII, without attributes: safe to show in full inside the prompt. */
 function fitsInline(item: CodeItem): boolean {
-  return !item.hasExtras && item.code.length <= INLINE_CODE_LIMIT && PLAIN_ASCII.test(item.code);
+  return !item.attributes && item.value.length <= INLINE_CODE_LIMIT && PLAIN_ASCII.test(item.value);
 }
 
-/**
- * The review file: code between start/end markers carrying a random nonce, so
- * code that contains its own "end of code" line cannot make the file look like
- * the code stopped early and the rest is our text.
+/*
+ * The review file. Markers carry a random nonce (unknown when the code was
+ * written), so code cannot fake them; the file is read back by those markers.
+ *
+ *   === start of code <nonce> ===
+ *   --- item 1 of 2 <nonce>: <label>; runs on <where> ---
+ *   <value>
+ *   --- tag attributes of item 1 <nonce>: one name=value per line ---
+ *   <name>=<value>
+ *   --- item 2 of 2 <nonce>: ... ---
+ *   <value>
+ *   === end of code <nonce> ===
  */
-function renderSection(title: string, items: CodeItem[], nonce: string): string {
-  const total = items.reduce((n, i) => n + i.code.length, 0);
-  const parts = items.map(
-    (i, idx) => `--- ${idx + 1} of ${items.length}: ${i.label}; runs on ${i.where} ---\n${i.code}`
-  );
-  return (
-    `${title} (${items.length} item${items.length === 1 ? "" : "s"}, ${total} characters)\n` +
-    `=== start of code ${nonce} ===\n${parts.join("\n")}\n=== end of code ${nonce} ===`
-  );
+function itemHeader(i: number, n: number, nonce: string, item: CodeItem): string {
+  return `--- item ${i} of ${n} ${nonce}: ${item.label}; runs on ${item.where} ---`;
+}
+function attrHeader(i: number, nonce: string): string {
+  return `--- tag attributes of item ${i} ${nonce}: one name=value per line ---`;
+}
+
+function renderEditable(items: CodeItem[], nonce: string): string {
+  const out = [`=== start of code ${nonce} ===`];
+  items.forEach((item, idx) => {
+    out.push(itemHeader(idx + 1, items.length, nonce, item), item.value);
+    if (item.attributes) {
+      out.push(attrHeader(idx + 1, nonce), ...item.attributes.map((a) => `${a.name}=${a.value}`));
+    }
+  });
+  out.push(`=== end of code ${nonce} ===`);
+  return out.join("\n");
+}
+
+/** Read the code back out of the (possibly edited) review file; undefined if its markers are broken. */
+export function parseEditable(text: string, items: CodeItem[], nonce: string): AcceptedCode[] | undefined {
+  const lines = text.split("\n");
+  const start = lines.indexOf(`=== start of code ${nonce} ===`);
+  const end = lines.indexOf(`=== end of code ${nonce} ===`);
+  if (start < 0 || end < start) return undefined;
+  const body = lines.slice(start + 1, end);
+  const isItem = (l: string) => new RegExp(`^--- item (\\d+) of (\\d+) ${nonce}: .* ---$`).exec(l);
+  const isAttr = (l: string) => new RegExp(`^--- tag attributes of item (\\d+) ${nonce}: .* ---$`).exec(l);
+  const result: AcceptedCode[] = [];
+  let i = 0;
+  while (i < body.length) {
+    const m = isItem(body[i]);
+    if (!m || Number(m[1]) !== result.length + 1 || Number(m[2]) !== items.length) return undefined;
+    i++;
+    const valueLines: string[] = [];
+    while (i < body.length && !isItem(body[i]) && !isAttr(body[i])) valueLines.push(body[i++]);
+    const entry: AcceptedCode = { value: valueLines.join("\n") };
+    const item = items[result.length];
+    if (i < body.length && isAttr(body[i])) {
+      if (!item?.attributes || Number(isAttr(body[i])![1]) !== result.length + 1) return undefined;
+      i++;
+      const attributes: Attribute[] = [];
+      while (i < body.length && !isItem(body[i])) {
+        const line = body[i++];
+        if (line === "") continue;
+        const eq = line.indexOf("=");
+        if (eq <= 0) return undefined;
+        attributes.push({ name: line.slice(0, eq), value: line.slice(eq + 1) });
+      }
+      entry.attributes = attributes;
+    } else if (item?.attributes) {
+      return undefined;
+    }
+    result.push(entry);
+  }
+  return result.length === items.length ? result : undefined;
 }
 
 export type CodeReviewRequest = {
@@ -149,7 +237,10 @@ export type CodeReviewRequest = {
   replaced?: CodeItem[];
 };
 
-export type CodeReviewOutcome = ApprovalOutcome | { approved: false; reason: "file-changed" };
+export type CodeReviewOutcome =
+  | { approved: true; accepted: AcceptedCode[]; edited: boolean }
+  | Exclude<ApprovalOutcome, { approved: true }>
+  | { approved: false; reason: "file-unreadable" };
 
 /** ~/.requestly-mcp/review, private to the user; refuses to follow a symlink. */
 function reviewDir(): string {
@@ -163,16 +254,34 @@ function reviewDir(): string {
   return dir;
 }
 
-/** Identity and change history of a file: inode, size, last modification and last change (ns). */
-function fingerprint(path: string): string {
-  const st = statSync(path, { bigint: true });
-  return `${st.dev}:${st.ino}:${st.size}:${st.mtimeNs}:${st.ctimeNs}`;
+/**
+ * Open the review file in the user's default app for text files, so they don't
+ * have to find it (terminals don't reliably make a path in the prompt
+ * clickable). Best effort: never blocks, never writes to stdout (the MCP channel).
+ * Set REQUESTLY_MCP_OPEN_REVIEW_FILE=0 to turn it off.
+ */
+function openForReview(file: string): void {
+  if (process.env.REQUESTLY_MCP_OPEN_REVIEW_FILE === "0") return;
+  const [cmd, args] =
+    process.platform === "darwin"
+      ? ["open", [file]]
+      : process.platform === "win32"
+        ? ["explorer.exe", [file]]
+        : ["xdg-open", [file]];
+  try {
+    const child = spawn(cmd, args as string[], { detached: true, stdio: "ignore" });
+    child.on("error", (error) => console.error("Could not open the review file:", error));
+    child.unref();
+  } catch (error) {
+    console.error("Could not open the review file:", error);
+  }
 }
 
 /**
  * Ask the human to accept new code, in a prompt of at most 3 short lines.
- * Short plain code is shown in the prompt; anything else is reviewed in a
- * private local file that the prompt names and that is re-read on Accept.
+ * Short plain code is shown in the prompt; anything else is reviewed (and may
+ * be edited) in a private local file, and what that file holds on Accept is
+ * what gets saved.
  */
 export async function askHumanToAcceptCode(
   server: McpServer,
@@ -188,63 +297,69 @@ export async function askHumanToAcceptCode(
     req.action === "create"
       ? `Create ${req.ruleType} rule ${name} (saved ${req.status})`
       : `Change the code of ${req.ruleType} rule ${name} (${req.status})`;
+  const unchanged = (): CodeReviewOutcome => ({
+    approved: true,
+    accepted: req.added.map((i) => ({ value: i.value, attributes: i.attributes })),
+    edited: false,
+  });
 
   const inline =
     req.added.length === 1 && replaced.length <= 1 && [...req.added, ...replaced].every(fitsInline);
   if (inline) {
     const lines =
       req.action === "create"
-        ? [`${what}. Its code:`, `Code: ${req.added[0].code}`]
-        : [`${what}:`, `New: ${req.added[0].code}`, ...(replaced.length ? [`Was: ${replaced[0].code}`] : [])];
-    return askHumanToApprove(server, lines.join("\n"), options);
+        ? [`${what}. Its code:`, `Code: ${req.added[0].value}`]
+        : [`${what}:`, `New: ${req.added[0].value}`, ...(replaced.length ? [`Was: ${replaced[0].value}`] : [])];
+    const outcome = await askHumanToApprove(server, lines.join("\n"), options);
+    return outcome.approved ? unchanged() : outcome;
   }
 
-  // Review in a private local file.
-  const sections = renderSection(
-    req.action === "create" ? "Code to be saved" : "New code to be saved",
-    req.added,
-    nonce
-  );
-  const oldSection = replaced.length ? "\n\n" + renderSection("Saved code it replaces", replaced, nonce) : "";
+  // Review (and optionally edit) in a private local file.
+  const reference = replaced.length
+    ? "\n\nFor reference, the saved code this replaces (edits below this line are ignored):\n" +
+      replaced.map((r, i) => `--- saved ${i + 1} of ${replaced.length}: ${r.label}; runs on ${r.where} ---\n${shownText(r)}`).join("\n")
+    : "";
   const review =
-    `Requestly MCP: code waiting for your approval\n` +
-    `${req.action === "create" ? "Create" : "Change the code of"} ${req.ruleType} rule ${JSON.stringify(req.name)}\n` +
-    `Status after saving: ${req.status}\n\n` +
-    `${sections}${oldSection}\n`;
-  const all = [...req.added, ...replaced].map((i) => i.code).join("\n");
-  const lineCount = req.added.reduce((n, i) => n + i.code.split("\n").length, 0);
-  const charCount = req.added.reduce((n, i) => n + i.code.length, 0);
+    `Requestly MCP: ${req.action === "create" ? "create" : "change the code of"} ${req.ruleType} rule ` +
+    `${JSON.stringify(req.name)} (status after saving: ${req.status}).\n` +
+    `Read the code between the start and end lines. You may edit it: what this file holds when you ` +
+    `click Accept is what gets saved. Keep the marker lines as they are.\n\n` +
+    `${renderEditable(req.added, nonce)}${reference}\n`;
+  const all = [...req.added, ...replaced].map(shownText).join("\n");
+  const lineCount = req.added.reduce((n, i) => n + shownText(i).split("\n").length, 0);
+  const charCount = req.added.reduce((n, i) => n + shownText(i).length, 0);
 
   let file: string | undefined;
   try {
     file = join(reviewDir(), `${nonce}.txt`);
     writeFileSync(file, review, { mode: 0o600, flag: "wx" });
-    // Any write to the file, even one that puts the original text back, moves its
-    // change time (ctime), which ordinary programs cannot set back; replacing the
-    // file changes its inode. Both are compared on Accept, as well as the text.
-    const written = fingerprint(file);
-    const warning = DECEPTIVE.test(all) ? "Has invisible or text-direction characters! " : "";
+    openForReview(file);
+    const warning = DECEPTIVE.test(all) ? "Has hidden or bidi characters! " : "";
     const outcome = await askHumanToApprove(
       server,
       [
-        `${what}. Read the code in this file first:`,
-        // Alone on its line so a narrow terminal can't cut the link short; terminals
-        // make file:// URLs clickable (Cmd/Ctrl-click).
-        pathToFileURL(file).href,
-        `${lineCount} line${lineCount === 1 ? "" : "s"}, ${charCount} characters. ${warning}Changing the file cancels the save.`,
+        `${what}. Review or edit its code in:`,
+        // Alone on its line so a narrow terminal can't cut the path short.
+        file,
+        `${lineCount} line${lineCount === 1 ? "" : "s"}, ${charCount} characters. ${warning}The file's code on Accept is saved.`,
       ].join("\n"),
       options
     );
     if (!outcome.approved) return outcome;
-    let now: string;
-    let after: string;
+    let text: string;
     try {
-      after = fingerprint(file);
-      now = readFileSync(file, "utf8");
+      text = readFileSync(file, "utf8");
     } catch {
-      return { approved: false, reason: "file-changed" };
+      return { approved: false, reason: "file-unreadable" };
     }
-    return now === review && after === written ? outcome : { approved: false, reason: "file-changed" };
+    // An editor may save with Windows line endings; the original had none.
+    if (!review.includes("\r")) text = text.replace(/\r\n/g, "\n");
+    const accepted = parseEditable(text, req.added, nonce);
+    if (!accepted) return { approved: false, reason: "file-unreadable" };
+    const edited = accepted.some(
+      (a, i) => a.value !== req.added[i].value || JSON.stringify(a.attributes) !== JSON.stringify(req.added[i].attributes)
+    );
+    return { approved: true, accepted, edited };
   } catch (error) {
     console.error("Code review file could not be prepared:", error);
     return { approved: false, reason: "failed" };
@@ -270,10 +385,14 @@ export function codeNotApprovedText(
       return `Not saved: the user did not approve the code in ${what}. Nothing was changed. Do not retry unless the user asks again.`;
     case "failed":
       return `Not saved: the approval request for ${what} failed or timed out. Nothing was changed.`;
-    case "file-changed":
+    case "file-unreadable":
       return (
-        `Not saved: the review file for ${what} changed while the approval prompt was open, ` +
-        `so what was reviewed may not be what would be saved. Nothing was changed.`
+        `Not saved: the review file for ${what} could not be read back (it was removed, or its start, end ` +
+        `or item lines were changed). Nothing was changed.`
       );
   }
 }
+
+/** Note added to a successful result when the user edited the code before accepting. */
+export const EDITED_NOTE =
+  "\n\nNOTE: the user edited the code before accepting; the saved code differs from what was sent. Read the rule back before changing it again.";
