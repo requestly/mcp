@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { chmodSync, lstatSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { askHumanToApprove, type ApprovalOutcome } from "./humanApproval.js";
 
@@ -25,7 +26,7 @@ import { askHumanToApprove, type ApprovalOutcome } from "./humanApproval.js";
  * 2.1.330 shows at most 3 lines, each cut at the terminal width, with no way to
  * expand). So the prompt itself is kept to 3 short lines. Code that is one short
  * line of plain ASCII is shown in the prompt; anything else is written to a
- * private file under ~/.requestly-mcp/review/ that the prompt names. That file
+ * private file under ~/.requestly-mcp/review/ that the prompt links to (file://). That file
  * is re-read on Accept (nothing is saved if it changed) and deleted afterwards.
  */
 
@@ -168,11 +169,6 @@ function fingerprint(path: string): string {
   return `${st.dev}:${st.ino}:${st.size}:${st.mtimeNs}:${st.ctimeNs}`;
 }
 
-function displayPath(path: string): string {
-  const home = homedir();
-  return path.startsWith(home + "/") ? "~" + path.slice(home.length) : path;
-}
-
 /**
  * Ask the human to accept new code, in a prompt of at most 3 short lines.
  * Short plain code is shown in the prompt; anything else is reviewed in a
@@ -185,7 +181,7 @@ export async function askHumanToAcceptCode(
 ): Promise<CodeReviewOutcome> {
   const nonce = randomBytes(6).toString("hex");
   // Model-supplied name: JSON-quoted (no line breaks) and kept short so line 1 stays readable.
-  const shortName = req.name.length > 40 ? req.name.slice(0, 39) + "…" : req.name;
+  const shortName = req.name.length > 30 ? req.name.slice(0, 29) + "…" : req.name;
   const name = JSON.stringify(shortName);
   const replaced = req.action === "update" ? req.replaced ?? [] : [];
   const what =
@@ -227,13 +223,15 @@ export async function askHumanToAcceptCode(
     // change time (ctime), which ordinary programs cannot set back; replacing the
     // file changes its inode. Both are compared on Accept, as well as the text.
     const written = fingerprint(file);
-    const warning = DECEPTIVE.test(all) ? "Warning: it has invisible or text-direction characters. " : "";
+    const warning = DECEPTIVE.test(all) ? "Has invisible or text-direction characters! " : "";
     const outcome = await askHumanToApprove(
       server,
       [
-        `${what}. Read its code before you accept:`,
-        `${displayPath(file)} (${lineCount} line${lineCount === 1 ? "" : "s"}, ${charCount} characters)`,
-        `${warning}If the file changes before you accept, nothing is saved.`,
+        `${what}. Read the code in this file first:`,
+        // Alone on its line so a narrow terminal can't cut the link short; terminals
+        // make file:// URLs clickable (Cmd/Ctrl-click).
+        pathToFileURL(file).href,
+        `${lineCount} line${lineCount === 1 ? "" : "s"}, ${charCount} characters. ${warning}Changing the file cancels the save.`,
       ].join("\n"),
       options
     );

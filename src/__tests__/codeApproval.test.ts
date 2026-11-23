@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
@@ -25,10 +26,10 @@ import { registerTools } from '../tools/index.js';
 
 type Answer = (params: any) => any;
 
-/** The review file a prompt names (~ = $HOME), if any. */
+/** The review file a prompt links to (a file:// URL on its own line), if any. */
 function reviewPath(message: string): string | undefined {
-  const m = message.match(/(~\/\.requestly-mcp\/review\/[0-9a-f]+\.txt)/);
-  return m ? m[1].replace(/^~/, process.env.HOME!) : undefined;
+  const line = message.split('\n').find((l) => l.startsWith('file://'));
+  return line ? fileURLToPath(line) : undefined;
 }
 
 /** Everything the user can read for a prompt: its message plus the review file it names (read while open). */
@@ -131,7 +132,8 @@ describe('RQ-3011 / RQ-3021 — code in rules needs the human to accept it in th
     process.env.REQUESTLY_API_KEY = 'test-api-key';
     errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     originalHome = process.env.HOME;
-    home = mkdtempSync(join(tmpdir(), 'rq-home-'));
+    // A short HOME, like a real /Users/<name>, so prompt lines are realistic in length.
+    home = mkdtempSync('/tmp/rq-home-');
     process.env.HOME = home;
     saved = undefined;
     fetchMock = vi.fn(async (_url: string, init: any = {}) => {
@@ -411,6 +413,13 @@ describe('RQ-3011 / RQ-3021 — code in rules needs the human to accept it in th
         expect(p.path).toBeUndefined();
       });
 
+      it('links the file as a file:// URL alone on line 2, under the private review folder', async () => {
+        const p = await ask('a()\nb()');
+        const lines = p.message.split('\n');
+        expect(lines[1]).toMatch(/^file:\/\/\/\S+\/\.requestly-mcp\/review\/[0-9a-f]{12}\.txt$/);
+        expect(p.path).toBe(join(home, '.requestly-mcp', 'review', p.path.split('/').pop()));
+      });
+
       it('sends code over 60 characters to a file', async () => {
         const code = 'console.log("' + 'y'.repeat(50) + '")';
         expect(code.length).toBeGreaterThan(60);
@@ -422,7 +431,7 @@ describe('RQ-3011 / RQ-3021 — code in rules needs the human to accept it in th
       it('sends multi-line code to a file, and says how many lines', async () => {
         const p = await ask('a()\nb()\nc()');
         expect(p.file).toContain('a()\nb()\nc()');
-        expect(p.message).toContain('(3 lines, 11 characters)');
+        expect(p.message).toContain('3 lines, 11 characters.');
       });
 
       it('sends code with invisible or text-direction characters to a file, with a warning', async () => {

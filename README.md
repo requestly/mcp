@@ -18,7 +18,7 @@ This project is a Model Context Protocol (MCP) server implemented in TypeScript 
 ## Code in rules
 Script, Request and Response rules carry code that runs in your browser: inline scripts, script URLs (and their tag attributes), and request or response bodies. When the AI creates such a rule, or changes its code, your MCP host asks you to accept the code before anything is saved. When it changes code, you see the old code and the new code.
 
-- MCP hosts show only a few lines of a prompt (Claude Code shows 3). One short line of plain code (60 characters or fewer) is shown in the prompt itself. Anything else is written to a private file under `~/.requestly-mcp/review/` that the prompt names: read it there before you accept. If the file changes while the prompt is open, nothing is saved; the file is deleted afterwards.
+- MCP hosts show only a few lines of a prompt (Claude Code shows 3). One short line of plain code (60 characters or fewer) is shown in the prompt itself. Anything else is written to a private file under `~/.requestly-mcp/review/`, linked in the prompt as a `file://` URL (Cmd/Ctrl-click opens it in most terminals): read it there before you accept. If the file changes while the prompt is open, nothing is saved; the file is deleted afterwards.
 - If you decline, cancel, or don't answer within 5 minutes, nothing is saved.
 - Turning a rule on or off, renaming it, or changing which URLs it matches does not ask: it never adds code you haven't seen.
 - If your host doesn't support elicitation, rules with code can't be created or edited here; use the [Requestly app](https://app.requestly.io/rules/my-rules). Other rules work as before.
