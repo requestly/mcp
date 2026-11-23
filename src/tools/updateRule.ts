@@ -3,6 +3,13 @@ import { ruleSchema, schema, ValidatedRuleArgs } from "../types/updateRuleSchema
 import { buildResourceUrl, apiErrorResult } from "../apiClient.js";
 import { askHumanToAcceptCode, codeItems, codeNotApprovedText, newCode } from "../codeApproval.js";
 
+/** The parts of a saved rule that matter for an update; any difference means it changed. */
+function ruleVersion(rule: any): string {
+  if (!rule || typeof rule !== "object") return "";
+  const { modificationDate, name, description, status, ruleType, pairs, groupId } = rule;
+  return JSON.stringify([modificationDate, name, description, status, ruleType, pairs, groupId]);
+}
+
 export function registerUpdateRuleTool(server: McpServer) {
   server.registerTool(
     "update_rule",
@@ -119,6 +126,27 @@ export function registerUpdateRuleTool(server: McpServer) {
           );
           if (!approval.approved) {
             return { content: [{ type: "text", text: codeNotApprovedText(`rule ${ruleId}`, approval.reason) }] };
+          }
+          // The prompt can stay open for minutes. If the rule changed meanwhile, the
+          // user approved against a version that is no longer the saved one, and the
+          // merged body would overwrite the newer change: save nothing. (This narrows
+          // the window; an atomic check needs an api2 precondition, tracked as RQ-3014.)
+          const again = await fetch(buildResourceUrl("rules", ruleId), { method: "GET", headers });
+          if (!again.ok) {
+            return await apiErrorResult("re-read the rule before saving it", again);
+          }
+          const againJson: any = await again.json();
+          if (ruleVersion(againJson?.data ?? againJson) !== ruleVersion(saved)) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text:
+                    `Not saved: rule ${ruleId} changed while the approval prompt was open, so the code the user ` +
+                    `reviewed no longer matches what is saved. Nothing was changed. Do not retry unless the user asks again.`,
+                },
+              ],
+            };
           }
         }
 

@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { chmodSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, lstatSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -162,6 +162,12 @@ function reviewDir(): string {
   return dir;
 }
 
+/** Identity and change history of a file: inode, size, last modification and last change (ns). */
+function fingerprint(path: string): string {
+  const st = statSync(path, { bigint: true });
+  return `${st.dev}:${st.ino}:${st.size}:${st.mtimeNs}:${st.ctimeNs}`;
+}
+
 function displayPath(path: string): string {
   const home = homedir();
   return path.startsWith(home + "/") ? "~" + path.slice(home.length) : path;
@@ -217,6 +223,10 @@ export async function askHumanToAcceptCode(
   try {
     file = join(reviewDir(), `${nonce}.txt`);
     writeFileSync(file, review, { mode: 0o600, flag: "wx" });
+    // Any write to the file, even one that puts the original text back, moves its
+    // change time (ctime), which ordinary programs cannot set back; replacing the
+    // file changes its inode. Both are compared on Accept, as well as the text.
+    const written = fingerprint(file);
     const warning = DECEPTIVE.test(all) ? "Warning: it has invisible or text-direction characters. " : "";
     const outcome = await askHumanToApprove(
       server,
@@ -229,12 +239,14 @@ export async function askHumanToAcceptCode(
     );
     if (!outcome.approved) return outcome;
     let now: string;
+    let after: string;
     try {
+      after = fingerprint(file);
       now = readFileSync(file, "utf8");
     } catch {
       return { approved: false, reason: "file-changed" };
     }
-    return now === review ? outcome : { approved: false, reason: "file-changed" };
+    return now === review && after === written ? outcome : { approved: false, reason: "file-changed" };
   } catch (error) {
     console.error("Code review file could not be prepared:", error);
     return { approved: false, reason: "failed" };

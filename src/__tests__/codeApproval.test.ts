@@ -512,6 +512,44 @@ describe('RQ-3011 / RQ-3021 — code in rules needs the human to accept it in th
         }
       });
 
+      it('saves nothing if the file was changed and then put back before Accept', async () => {
+        const h = await connect({
+          elicitation: true,
+          answer: async (p) => {
+            const path = reviewPath(p.message)!;
+            const original = readFileSync(path, 'utf8');
+            await new Promise((r) => setTimeout(r, 5));
+            writeFileSync(path, 'console.log("harmless")'); // what the user is shown...
+            await new Promise((r) => setTimeout(r, 5));
+            writeFileSync(path, original); // ...then the original is put back
+            return { action: 'accept', content: {} };
+          },
+        });
+        try {
+          const result: any = await h.client.callTool({ name: 'create_rule', arguments: longArgs });
+          expect(writes()).toHaveLength(0);
+          expect(text(result)).toContain('changed');
+        } finally {
+          await h.close();
+        }
+      });
+
+      it('accepts when the file was only read', async () => {
+        const h = await connect({
+          elicitation: true,
+          answer: (p) => {
+            readFileSync(reviewPath(p.message)!, 'utf8');
+            return { action: 'accept', content: {} };
+          },
+        });
+        try {
+          await h.client.callTool({ name: 'create_rule', arguments: longArgs });
+          expect(writes()).toHaveLength(1);
+        } finally {
+          await h.close();
+        }
+      });
+
       it('removes the review file when the human declines', async () => {
         let path: string | undefined;
         const h = await connect({ elicitation: true, answer: (p) => { path = reviewPath(p.message); return { action: 'decline' }; } });
@@ -556,6 +594,25 @@ describe('RQ-3011 / RQ-3021 — code in rules needs the human to accept it in th
         await h.client.callTool({ name: 'update_rule', arguments: { ruleId: 'Rule_abc12', ruleType: 'Script', status: 'Inactive' } });
         expect(sentBody().name).toBe('Saved rule');
         expect(sentBody().status).toBe('Inactive');
+      } finally {
+        await h.close();
+      }
+    });
+
+    it('saves nothing if the rule changed while the prompt was open', async () => {
+      saved = base();
+      const h = await connect({
+        elicitation: true,
+        answer: () => {
+          saved = { ...saved, modificationDate: 2, pairs: [script.pair("console.log('changed in the app')")] };
+          return { action: 'accept', content: {} };
+        },
+      });
+      try {
+        const result: any = await h.client.callTool({ name: 'update_rule', arguments: { ruleId: 'Rule_abc12', ruleType: 'Script', pairs: [script.pair('x()')] } });
+        expect(h.prompts).toHaveLength(1);
+        expect(writes()).toHaveLength(0);
+        expect(text(result)).toContain('changed while the approval prompt was open');
       } finally {
         await h.close();
       }
