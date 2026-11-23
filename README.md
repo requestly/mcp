@@ -15,6 +15,15 @@ This project is a Model Context Protocol (MCP) server implemented in TypeScript 
 - If your host doesn't support elicitation, these tools can't delete; delete the rule or group in the [Requestly app](https://app.requestly.io/rules/my-rules) instead.
 - Deleting a group keeps the rules inside it; they stay in your workspace without a group.
 
+## Code in rules
+Script, Request and Response rules carry code that runs in your browser: inline scripts, script URLs (and their tag attributes), and request or response bodies. When the AI creates such a rule, or changes its code, your MCP host asks you to accept the code before anything is saved. When it changes code, you see the old code and the new code.
+
+- MCP hosts show only a few lines of a prompt (Claude Code shows 3). One short line of plain code (60 characters or fewer) is shown in the prompt itself. Anything else is written to a private file under `~/.requestly-mcp/review/`, which opens in your default text editor and is named in the prompt. Read it there, and edit it if you like: what the file holds when you click Accept is what gets saved (keep its marker lines). The file is deleted afterwards. Set `REQUESTLY_MCP_OPEN_REVIEW_FILE=0` to stop it opening automatically.
+- If you decline, cancel, or don't answer within 5 minutes, nothing is saved.
+- Turning a rule on or off, renaming it, or changing which URLs it matches does not ask: it never adds code you haven't seen.
+- If your host doesn't support elicitation, rules with code can't be created or edited here; use the [Requestly app](https://app.requestly.io/rules/my-rules). Other rules work as before.
+- When updating a rule, any field you leave out keeps its saved value.
+
 
 ## Requirements
 - Node.js 22.23.4+ or 24.22.1+. Older versions miss the October 2026 Node.js security fixes.
