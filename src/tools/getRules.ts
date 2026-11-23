@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { REQUESTLY_API_BASE, buildResourceUrl, apiErrorResult, resourceIdSchema } from "../apiClient.js";
+import { REQUESTLY_API_BASE, buildResourceUrl, apiErrorResult, resourceIdSchema, readApiJson } from "../apiClient.js";
+import { UNTRUSTED_OUTPUT_DESCRIPTION, untrustedDataResult } from "../untrustedData.js";
 
 export const getRulesInputSchema = {
   ruleId: resourceIdSchema.optional().describe("Unique ID of the rule to retrieve. If omitted, retrieves all rules."),
@@ -14,7 +15,8 @@ export function registerGetRulesTool(server: McpServer) {
     {
       title: "Get Rules",
       description:
-        "Retrieve all rules or a specific rule from Requestly using its API. Supports pagination and lookup by ruleId.",
+        "Retrieve all rules or a specific rule from Requestly using its API. Supports pagination and lookup by ruleId." +
+        UNTRUSTED_OUTPUT_DESCRIPTION,
       inputSchema: getRulesInputSchema,
     },
     async (args) => {
@@ -53,15 +55,9 @@ export function registerGetRulesTool(server: McpServer) {
           // RQ-3025: status only — never reflect the upstream body into LLM context.
           return await apiErrorResult("get rules", response);
         }
-        const data = await response.json();
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify(data, null, 2),
-            },
-          ],
-        };
+        const parsed = await readApiJson("get rules", response);
+        if (!parsed.ok) return parsed.result;
+        return untrustedDataResult("get_rules", parsed.data);
       } catch (error) {
         return {
           content: [

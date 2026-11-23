@@ -1,7 +1,11 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ruleSchema, schema, ValidatedRuleArgs } from "../types/updateRuleSchemas.js";
-import { buildResourceUrl, apiErrorResult } from "../apiClient.js";
+import { buildResourceUrl, apiErrorResult, readApiJson } from "../apiClient.js";
+import { untrustedDataResult } from "../untrustedData.js";
 import { EDITED_NOTE, applyAccepted, askHumanToAcceptCode, codeItems, codeNotApprovedText, newCode } from "../codeApproval.js";
+
+/** Rule types the update schema accepts. */
+const KNOWN_RULE_TYPES: readonly string[] = schema.ruleType.options;
 
 /** The parts of a saved rule that matter for an update; any difference means it changed. */
 function ruleVersion(rule: any): string {
@@ -76,7 +80,9 @@ export function registerUpdateRuleTool(server: McpServer) {
           // RQ-3025: status only — never reflect the upstream body into LLM context.
           return await apiErrorResult("read the rule before updating it", current);
         }
-        const currentJson: any = await current.json();
+        const currentRead = await readApiJson("read the rule before updating it", current);
+        if (!currentRead.ok) return currentRead.result;
+        const currentJson: any = currentRead.data;
         const saved: any = currentJson?.data ?? currentJson;
         if (!saved || typeof saved !== "object" || typeof saved.ruleType !== "string") {
           return { content: [{ type: "text", text: "Failed to update rule: the saved rule could not be read." }] };
@@ -87,7 +93,10 @@ export function registerUpdateRuleTool(server: McpServer) {
               {
                 type: "text",
                 text:
-                  `Not updated: rule ${ruleId} is a ${saved.ruleType} rule and a rule's type can't be changed. ` +
+                  // RQ-3019: the saved ruleType is stored data; name it only when it is a known type.
+                  `Not updated: rule ${ruleId} is ${
+                    KNOWN_RULE_TYPES.includes(saved.ruleType) ? `a ${saved.ruleType} rule` : "a rule of another type"
+                  } and a rule's type can't be changed. ` +
                   `Create a new ${validatedArgs.ruleType} rule instead.`,
               },
             ],
@@ -139,7 +148,9 @@ export function registerUpdateRuleTool(server: McpServer) {
           if (!again.ok) {
             return await apiErrorResult("re-read the rule before saving it", again);
           }
-          const againJson: any = await again.json();
+          const againRead = await readApiJson("re-read the rule before saving it", again);
+          if (!againRead.ok) return againRead.result;
+          const againJson: any = againRead.data;
           if (ruleVersion(againJson?.data ?? againJson) !== ruleVersion(saved)) {
             return {
               content: [
@@ -163,15 +174,9 @@ export function registerUpdateRuleTool(server: McpServer) {
           // RQ-3025: status only — never reflect the upstream body into LLM context.
           return await apiErrorResult("update rule", response);
         }
-        const data = await response.json();
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify(data, null, 2) + (edited ? EDITED_NOTE : ""),
-            },
-          ],
-        };
+        const parsed = await readApiJson("update rule", response);
+        if (!parsed.ok) return parsed.result;
+        return untrustedDataResult("update_rule", parsed.data, edited ? EDITED_NOTE : "");
       } catch (error) {
         return {
           content: [

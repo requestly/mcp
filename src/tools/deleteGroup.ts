@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { buildResourceUrl, apiErrorResult, resourceIdSchema } from "../apiClient.js";
+import { buildResourceUrl, apiErrorResult, resourceIdSchema, readApiJson } from "../apiClient.js";
+import { untrustedDataResult } from "../untrustedData.js";
 import { askHumanToApprove, notApprovedText } from "../humanApproval.js";
 
 export function registerDeleteGroupTool(server: McpServer) {
@@ -62,15 +63,9 @@ export function registerDeleteGroupTool(server: McpServer) {
           // RQ-3025: status only — never reflect the upstream body.
           return await apiErrorResult("delete group", response);
         }
-        const data = await response.json();
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify(data, null, 2),
-            },
-          ],
-        };
+        const parsed = await readApiJson("delete group", response);
+        if (!parsed.ok) return parsed.result;
+        return untrustedDataResult("delete_group", parsed.data);
       } catch (error) {
         return {
           content: [

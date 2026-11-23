@@ -1,13 +1,14 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { REQUESTLY_API_BASE, apiErrorResult } from "../apiClient.js";
+import { REQUESTLY_API_BASE, apiErrorResult, readApiJson } from "../apiClient.js";
+import { UNTRUSTED_OUTPUT_DESCRIPTION, untrustedDataResult } from "../untrustedData.js";
 
 export function registerGetGroupsTool(server: McpServer) {
   server.registerTool(
     "get_groups",
     {
       title: "Get Groups",
-      description: "Get all groups in Requestly.",
+      description: "Get all groups in Requestly." + UNTRUSTED_OUTPUT_DESCRIPTION,
       inputSchema: {
         offset: z.number().optional().default(0),
         pageSize: z.number().optional().default(30),
@@ -42,15 +43,9 @@ export function registerGetGroupsTool(server: McpServer) {
           // RQ-3025: status only — never reflect the upstream body.
           return await apiErrorResult("get groups", response);
         }
-        const data = await response.json();
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify(data, null, 2),
-            },
-          ],
-        };
+        const parsed = await readApiJson("get groups", response);
+        if (!parsed.ok) return parsed.result;
+        return untrustedDataResult("get_groups", parsed.data);
       } catch (error) {
         return {
           content: [
