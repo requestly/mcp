@@ -240,6 +240,69 @@ describe('RQ-3019 — stored or upstream text never reaches the model outside th
     }
   });
 
+  // update_rule reads three replies: the saved rule, the re-read after an approval,
+  // and the PUT. Each one that is not JSON must give the fixed message.
+  const notJson = () => ({
+    ok: true,
+    status: 200,
+    statusText: 'OK',
+    json: () => Promise.resolve().then(() => JSON.parse(`<html>${SYSTEM_TEXT}</html>`)),
+    text: () => Promise.resolve(`<html>${SYSTEM_TEXT}</html>`),
+  });
+  const savedScript = {
+    ...plantedRule,
+    id: 'Script_ab12c',
+    ruleType: 'Script',
+    pairs: [{ id: 'p1', source, scripts: [{ codeType: 'js', type: 'code', loadTime: 'afterPageLoad', value: "console.log('a')" }] }],
+  };
+  const calls = (m: any) => m.mock.calls.map(([u, i]: any[]) => `${i?.method ?? 'GET'} ${String(u).replace(/^.*\/v1/, '')}`);
+
+  it('update_rule: a PUT reply that is not JSON gives a fixed message', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(okResponse({ success: true, data: plantedRule }))
+      .mockResolvedValueOnce(notJson());
+    globalThis.fetch = fetchMock as any;
+    const h = await connect();
+    try {
+      const out = text(
+        await h.client.callTool({ name: 'update_rule', arguments: { ruleId: 'Cancel_ab12c', ruleType: 'Cancel', name: 'rq9413 renamed' } })
+      );
+      expect(calls(fetchMock)).toEqual(['GET /rules/Cancel_ab12c', 'PUT /rules/Cancel_ab12c']);
+      expect(out).toMatch(/^Failed to update rule: the API reply could not be read \(status 200\)/);
+      expect(out).toMatch(/may still have been saved/);
+      expect(out).not.toContain('SYST');
+    } finally {
+      await h.close();
+    }
+  });
+
+  it('update_rule: a re-read after the approval that is not JSON gives a fixed message and saves nothing', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(okResponse({ success: true, data: savedScript }))
+      .mockResolvedValueOnce(notJson());
+    globalThis.fetch = fetchMock as any;
+    const h = await connect();
+    try {
+      const out = text(
+        await h.client.callTool({
+          name: 'update_rule',
+          arguments: {
+            ruleId: 'Script_ab12c',
+            ruleType: 'Script',
+            pairs: [{ source, scripts: [{ codeType: 'js', type: 'code', loadTime: 'afterPageLoad', value: "console.log('b')" }] }],
+          },
+        })
+      );
+      expect(calls(fetchMock)).toEqual(['GET /rules/Script_ab12c', 'GET /rules/Script_ab12c']);
+      expect(out).toMatch(/^Failed to re-read the rule before saving it: the API reply could not be read \(status 200\)/);
+      expect(out).not.toContain('SYST');
+    } finally {
+      await h.close();
+    }
+  });
+
   // A reply that is not JSON: Node's parse error quotes its first ~10 characters
   // (`Unexpected token '<', "<html>SYST"... is not valid JSON`).
   for (const c of cases) {
