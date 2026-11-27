@@ -143,7 +143,8 @@ export function registerUpdateRuleTool(server: McpServer) {
           // The prompt can stay open for minutes. If the rule changed meanwhile, the
           // user approved against a version that is no longer the saved one, and the
           // merged body would overwrite the newer change: save nothing. (This narrows
-          // the window; an atomic check needs an api2 precondition, tracked as RQ-3014.)
+          // the window but can't close it: that needs a precondition on api2's
+          // update, which it doesn't offer.)
           const again = await fetch(buildResourceUrl("rules", ruleId), { method: "GET", headers });
           if (!again.ok) {
             return await apiErrorResult("re-read the rule before saving it", again);
